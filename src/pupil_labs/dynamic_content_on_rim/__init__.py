@@ -1,4 +1,4 @@
-"""Top-level entry-point for the <project_name> package"""
+"""Top-level entry-point for the <dynamic_content_on_rim> package"""
 
 try:
     from importlib.metadata import PackageNotFoundError, version
@@ -6,7 +6,7 @@ except ImportError:
     from importlib_metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("pupil_labs.project_name")
+    __version__ = version("pupil_labs.dynamic_content_on_rim")
 except PackageNotFoundError:
     # package is not installed
     pass

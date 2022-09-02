@@ -7,7 +7,7 @@ Welcome to |project| documentation!
    history
 
 
-.. automodule:: skeleton
+.. automodule:: dynamic_content_on_rim
     :members:
     :undoc-members:
     :show-inheritance:

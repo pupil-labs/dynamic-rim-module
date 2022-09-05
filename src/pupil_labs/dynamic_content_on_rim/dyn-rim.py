@@ -1,13 +1,14 @@
 """
 Python 3.10 Dynamic RIM Script
-This script is used to plot gaze over a video displayed on RIM enrichmed eye tracking recording.
+This script is used to plot gaze over a video displayed on RIM 
+enrichment eye tracking recording.
 First, ensure you have the required dependencies installed:
     pip install -r requirements.txt
 Then run the script:
     python dyn-rim.py
 @author: mgg
 Version 1.0
-Date: 04/08/2022
+Date: 02/09/2022
 """
 
 import logging
@@ -18,6 +19,7 @@ import pathlib
 import time
 import tkinter as tk
 import uuid
+from fractions import Fraction
 from tkinter import filedialog
 
 import av
@@ -255,10 +257,12 @@ def read_screen_video(video_path, audio=False):
         logging.info("Extracting pts...")
         pts = []
         ts = []
+        dts = []
         for packet in video_container.demux(stream):
             for frame in packet.decode():
                 if frame is not None and frame.pts is not None:
                     pts.append(frame.pts)
+                    dts.append(frame.dts)
                     ts.append(
                         float(
                             frame.pts * frame.time_base
@@ -266,6 +270,11 @@ def read_screen_video(video_path, audio=False):
                         )
                         * 1e9
                     )
+        if not isMonotonicInc(pts):
+            logging.info("Pts are not monotonic increasing!.")
+        if np.array_equal(pts, dts):
+            logging.info("Pts and dts are equal, using pts")
+
         pts.sort()
         ts.sort()
 
@@ -433,9 +442,13 @@ def save_videos(
         out_video.height = mheight
         out_video.width = _etframe.width + _scframe.width + refimg_finalwidth
         out_video.pix_fmt = "yuv420p"
+        out_video.codec_context.time_base = Fraction(1, 30)
+
         out_audio = out_container.add_stream(
-            "aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
+            codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
         )
+
+        out_audio.time_base = out_audio.codec_context.time_base
         idx = 0
         _etlpts = -1
         _sclpts = -1
@@ -528,7 +541,11 @@ def save_videos(
 
                 progress_bar(idx, merged.shape[0], "encoding video")
             idx += 1
-        if merged_audio is not None:
+        # Flush the encoder
+        if _recording:
+            for packet in out_video.encode(None):
+                out_container.mux(packet)
+        if merged_audio is not None and _recording:
             idx = 0
             a_sclpts = -1
             while idx < merged_audio.shape[0]:
@@ -536,20 +553,23 @@ def save_videos(
                 a_scframe, a_sclpts = get_frame(
                     sc_audio, int(row["pts_audio"]), a_sclpts, a_scframe, audio=True
                 )
+                logging.debug(f"Audio frame time: {a_scframe.time}s")
                 if a_scframe is None:
                     break
-                for packet in out_audio.encode(a_scframe):
-                    out_container.mux(packet)
+                elif a_scframe.is_corrupt:
+                    logging.info(f"Frame {idx} is corrupt")
+                else:
+                    a_scframe.pts = None  # https://github.com/PyAV-Org/PyAV/issues/761
+                    aframes = out_audio.encode(a_scframe)
+                    out_container.mux(aframes)
 
                 progress_bar(idx, merged_audio.shape[0], label=" encoding audio")
                 idx += 1
-        # After loop finished
-        if _recording:
+            # After loop finished flush
             for packet in out_audio.encode(None):
                 out_container.mux(packet)
-            for packet in out_video.encode(None):
-                out_container.mux(packet)
-
+        if _recording:
+            out_container.close()
         logging.info("Video saved to: " + out_vidpath)
 
 
@@ -664,9 +684,13 @@ def get_path(msg, file):
     root.withdraw()
     _path = filedialog.askdirectory(title=msg, message=msg)
     assert _path is not None, "No path selected"
-    if not os.path.exists(_path):
+    if not os.path.exists(file):
         logging.error("File not found, probably wrong folder")
     return _path
+
+
+def isMonotonicInc(a2check):
+    return all(a2check[i] <= a2check[i + 1] for i in range(len(a2check) - 1))
 
 
 if __name__ == "__main__":

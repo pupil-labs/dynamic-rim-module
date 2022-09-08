@@ -1,6 +1,6 @@
 """
 Python 3.10 Dynamic RIM Script
-This script is used to plot gaze over a video displayed on RIM 
+This script is used to plot gaze over a video displayed on RIM
 enrichment eye tracking recording.
 First, ensure you have the required dependencies installed:
     pip install -r requirements.txt
@@ -414,14 +414,14 @@ def save_videos(
     bkg = np.zeros((mheight, _etframe.width + _scframe.width + refimg_finalwidth, 3))
 
     # Locate images' origins on bkg
-    c_refimg = [int(0), int(mwidth)]
+    c_refimg = [int(0), int(_etframe.width)]
     c_etvid = [
         int((mheight / 2) - (_etframe.height / 2)),
-        int((mwidth / 2) - (_etframe.width / 2)),
+        int(0),
     ]
     c_scvid = [
         int((mheight / 2) - (_scframe.height / 2)),
-        int(mwidth + refimg_finalwidth),
+        int(_etframe.width + refimg_finalwidth),
     ]
 
     # Select where to store the video
@@ -684,8 +684,8 @@ def get_path(msg, file):
     root.withdraw()
     _path = filedialog.askdirectory(title=msg, message=msg)
     assert _path is not None, "No path selected"
-    if not os.path.exists(file):
-        logging.error("File not found, probably wrong folder")
+    if not os.path.exists(os.path.join(_path, file)):
+        logging.error(f"File {file} not found, probably wrong folder")
     return _path
 
 

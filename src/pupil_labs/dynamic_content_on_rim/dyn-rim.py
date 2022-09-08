@@ -35,7 +35,9 @@ logging.basicConfig(
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
 
 
-def main(withAudio=True):
+def main(_scaudio=True, _piaudio=False):
+    if _scaudio and _piaudio:
+        raise ValueError("You cannot have both screen audio and PI audio!")
     # Ask the user to select the RIM folder
     rim_dir = get_path("Select the RIM directory", "gaze.csv")
     start_time = time.time()
@@ -79,11 +81,15 @@ def main(withAudio=True):
 
     logging.info("Reading screen video...")
     _, sc_frames, sc_pts, sc_ts = read_screen_video(sc_video_path)
-    if withAudio:
+    if _scaudio:
         logging.info("Reading screen audio...")
         _, asc_frames, asc_pts, asc_ts = read_screen_video(sc_video_path, audio=True)
+
     logging.info("Reading eye tracking video...")
     _, et_frames, et_pts, et_ts = read_screen_video(et_video_path)
+    if _piaudio:
+        logging.info("Reading PI audio...")
+        _, aet_frames, aet_pts, aet_ts = read_screen_video(et_video_path, audio=True)
 
     logging.debug(
         "The screen video had a mean frame pts diff {} (SD: {})".format(
@@ -141,7 +147,7 @@ def main(withAudio=True):
     # Create some timestamps [ns] for the screen video to match, use the start_video_ns
     # and the ts of the screen video
     sc_timestamps_ns = sc_ts + start_video_ns
-    if withAudio:
+    if _scaudio:
         asc_timestamps_ns = asc_ts + start_video_ns
     end_video_ns = np.min(
         [np.max(sc_timestamps_ns), np.max(world_timestamps_df["timestamp [ns]"])]
@@ -151,11 +157,16 @@ def main(withAudio=True):
     sc_video_df["frame"] = np.arange(sc_frames)
     sc_video_df["timestamp [ns]"] = sc_timestamps_ns.astype(int)
     sc_video_df["pts"] = [int(pt) for pt in sc_pts]
-    if withAudio:
+    if _scaudio:
         sc_audio_df = pd.DataFrame()
         sc_audio_df["frame"] = np.arange(asc_frames)
         sc_audio_df["timestamp [ns]"] = asc_timestamps_ns.astype(int)
         sc_audio_df["pts"] = [int(pt) for pt in asc_pts]
+    if _piaudio:
+        et_audio_df = pd.DataFrame()
+        et_audio_df["frame"] = np.arange(aet_frames)
+        et_audio_df["timestamp [ns]"] = np.array(aet_ts).astype(int)
+        et_audio_df["pts"] = [int(pt) for pt in aet_pts]
 
     et_video_df = pd.DataFrame()
     et_video_df["frame"] = np.arange(et_frames)
@@ -165,7 +176,7 @@ def main(withAudio=True):
     logging.info("Creating matched timestamps tables for video:")
     merged = merge_tables(
         sc_video_df,
-        sc_audio_df,
+        None,
         et_video_df,
         gaze_rim_df.sort_values(by=["timestamp [ns]"]),
         gaze_df,
@@ -174,10 +185,14 @@ def main(withAudio=True):
     )
     merged = merged[merged["timestamp [ns]"] <= end_video_ns]
 
-    if withAudio:
+    if _scaudio or _piaudio:
         logging.info("Creating matched timestamps tables for video:")
+        if _scaudio:
+            tbl = sc_audio_df
+        elif _piaudio:
+            tbl = et_audio_df
         merged_audio = merge_tables(
-            sc_audio_df,
+            tbl,
             sc_video_df,
             et_video_df,
             gaze_rim_df.sort_values(by=["timestamp [ns]"]),
@@ -201,6 +216,7 @@ def main(withAudio=True):
         sc_video_path,
         et_video_path,
         merged_audio,
+        _scaudio,
     )
 
     logging.info("Mischief managed! ⚡️")
@@ -209,13 +225,16 @@ def main(withAudio=True):
 
 def merge_tables(table1, table2, table3, table4, table5, label1, label2):
     logging.info("Merging audio and image for screen video...")
-    merged_sc = pd.merge_asof(
-        table1,
-        table2,
-        on="timestamp [ns]",
-        direction="nearest",
-        suffixes=[label1, label2],
-    )
+    if table2 is not None:
+        merged_sc = pd.merge_asof(
+            table1,
+            table2,
+            on="timestamp [ns]",
+            direction="nearest",
+            suffixes=[label1, label2],
+        )
+    else:
+        merged_sc = table1
     logging.info("Merging videos timestamps...")
     merged_vid = pd.merge_asof(
         merged_sc,
@@ -380,8 +399,10 @@ def save_videos(
     sc_video_path,
     et_video_path,
     merged_audio,
+    _scaudio,
     _visualise=False,
     _recording=True,
+    _label=True,
 ):
     """
     A function to plot/record the ref image, eye tracking video and
@@ -394,6 +415,7 @@ def save_videos(
     :param et_video_path: The eye tracking video path
     :param _visualise: If True, the video will be visualised
     :param _recording: If True, the video will be recorded
+    :param _label: If True, the videos will be labelled
     """
     # Decode the first frames and read the max height and width of the videos
     with av.open(et_video_path) as et_video, av.open(sc_video_path) as sc_video:
@@ -402,7 +424,10 @@ def save_videos(
         mwidth = _etframe.width
         _scframe = next(sc_video.decode(video=0))
         if merged_audio is not None:
-            a_scframe = next(sc_video.decode(audio=0))
+            if _scaudio:
+                audio_frame = next(sc_video.decode(audio=0))
+            else:
+                audio_frame = next(et_video.decode(audio=0))
         if _scframe.height > mheight:
             mheight = _scframe.height
         if _scframe.width > mwidth:
@@ -435,6 +460,8 @@ def save_videos(
     with av.open(et_video_path) as et_video, av.open(
         sc_video_path
     ) as sc_video, av.open(sc_video_path) as sc_audio, av.open(
+        et_video_path
+    ) as et_audio, av.open(
         out_vidpath, "w"
     ) as out_container:
         out_container.metadata["title"] = "Merged video"
@@ -443,10 +470,14 @@ def save_videos(
         out_video.width = _etframe.width + _scframe.width + refimg_finalwidth
         out_video.pix_fmt = "yuv420p"
         out_video.codec_context.time_base = Fraction(1, 30)
-
-        out_audio = out_container.add_stream(
-            codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
-        )
+        if _scaudio and merged_audio is not None:
+            out_audio = out_container.add_stream(
+                codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
+            )
+        elif not _scaudio and merged_audio is not None:
+            out_audio = out_container.add_stream(
+                codec_name="aac", rate=et_audio.streams.audio[0].rate, layout="stereo"
+            )
 
         out_audio.time_base = out_audio.codec_context.time_base
         idx = 0
@@ -454,9 +485,11 @@ def save_videos(
         _sclpts = -1
         while idx < merged.shape[0]:
             row = merged.iloc[idx]
-            _etframe, _etlpts = get_frame(et_video, int(row["pts"]), _etlpts, _etframe)
+            _etframe, _etlpts = get_frame(
+                et_video, int(row["pts_world"]), _etlpts, _etframe
+            )
             _scframe, _sclpts = get_frame(
-                sc_video, int(row["pts_video"]), _sclpts, _scframe
+                sc_video, int(row["pts_sc"]), _sclpts, _scframe
             )
 
             if _etframe is None or _scframe is None:
@@ -506,24 +539,36 @@ def save_videos(
                 c_scvid[1] : c_scvid[1] + _scframe_final.shape[1],
                 :,
             ] = _scframe_final
-
-            # Add text to the frames
-            labels = [
-                {"text": "PI Video", "margin": 10},
-                {"text": "Reference Image", "margin": 10 + mwidth},
-                {"text": "Screen Video", "margin": 10 + (mwidth + refimg_finalwidth)},
-            ]
-            for label in labels:
-                bkg = cv2.putText(
-                    bkg,
-                    label["text"],
-                    (label["margin"], 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    (255, 255, 255),
-                    1,
-                    2,
-                )
+            if _label:
+                # Add text to the frames
+                y, w, h = 60, 360, 60
+                labels = [
+                    {"text": "PI Video", "margin": 10},
+                    {"text": "Reference Image", "margin": 10 + _etframe.width},
+                    {
+                        "text": "Screen Video",
+                        "margin": 10 + (_etframe.width + refimg_finalwidth),
+                    },
+                ]
+                for label in labels:
+                    overlay = bkg[
+                        y : y + h, (label["margin"] - 10) : (label["margin"] - 10 + w)
+                    ]
+                    whiterect = np.ones(overlay.shape) * 255
+                    res = cv2.addWeighted(overlay, 0.5, whiterect, 0.5, 0)
+                    bkg[
+                        y : y + h, (label["margin"] - 10) : (label["margin"] - 10) + w
+                    ] = res
+                    bkg = cv2.putText(
+                        bkg,
+                        label["text"],
+                        (label["margin"], 100),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.2,
+                        (0, 0, 0),
+                        1,
+                        2,
+                    )
             # Get the final frame
             out_ = bkg.copy()
             out_ = cv2.normalize(out_, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
@@ -547,20 +592,35 @@ def save_videos(
                 out_container.mux(packet)
         if merged_audio is not None and _recording:
             idx = 0
-            a_sclpts = -1
+            audio_pts = -1
             while idx < merged_audio.shape[0]:
                 row = merged_audio.iloc[idx]
-                a_scframe, a_sclpts = get_frame(
-                    sc_audio, int(row["pts_audio"]), a_sclpts, a_scframe, audio=True
-                )
-                logging.debug(f"Audio frame time: {a_scframe.time}s")
-                if a_scframe is None:
+                if _scaudio:
+                    audio_frame, audio_pts = get_frame(
+                        sc_audio,
+                        int(row["pts_audio"]),
+                        audio_pts,
+                        audio_frame,
+                        audio=True,
+                    )
+                else:
+                    audio_frame, audio_pts = get_frame(
+                        et_audio,
+                        int(row["pts_audio"]),
+                        audio_pts,
+                        audio_frame,
+                        audio=True,
+                    )
+                logging.debug(f"Audio frame time: {audio_frame.time}s")
+                if audio_frame is None:
                     break
-                elif a_scframe.is_corrupt:
+                elif audio_frame.is_corrupt:
                     logging.info(f"Frame {idx} is corrupt")
                 else:
-                    a_scframe.pts = None  # https://github.com/PyAV-Org/PyAV/issues/761
-                    aframes = out_audio.encode(a_scframe)
+                    audio_frame.pts = (
+                        None  # https://github.com/PyAV-Org/PyAV/issues/761
+                    )
+                    aframes = out_audio.encode(audio_frame)
                     out_container.mux(aframes)
 
                 progress_bar(idx, merged_audio.shape[0], label=" encoding audio")

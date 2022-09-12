@@ -35,7 +35,7 @@ logging.basicConfig(
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
 
 
-def main(_scaudio=True, _piaudio=False):
+def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     if _scaudio and _piaudio:
         raise ValueError("You cannot have both screen audio and PI audio!")
     # Ask the user to select the RIM folder
@@ -133,7 +133,6 @@ def main(_scaudio=True, _piaudio=False):
     gaze_rim_df[
         ["gaze position transf x [px]", "gaze position transf y [px]"]
     ] = pd.DataFrame(xy_transf[0]).set_index(gaze_rim_df.index)
-
     # Get the patch of the screen
     mask = np.zeros(np.asarray(ref_img.shape)[0:2], dtype=np.uint8)
     cv2.fillPoly(mask, [corners_screen], (255))
@@ -218,7 +217,15 @@ def main(_scaudio=True, _piaudio=False):
         merged_audio,
         _scaudio,
     )
-
+    if _saveCSV:
+        logging.info("Saving CSV...")
+        out_csvpath = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            initialdir=pathlib.Path.home(),
+            initialfile=("gaze.csv"),
+            title="Select where to save the output csv file",
+        )
+        gaze_rim_df.to_csv(out_csvpath, index=True)
     logging.info("Mischief managed! ⚡️")
     logging.info("Executed in: %s seconds" % (time.time() - start_time))
 

@@ -16,6 +16,7 @@ import logging
 # Importing necessary libraries
 import os
 import pathlib
+import platform
 import time
 import tkinter as tk
 import uuid
@@ -789,7 +790,12 @@ def progress_bar(current, total, label="", bar_length=20):
 def get_path(msg, file):
     root = tk.Tk()
     root.withdraw()
-    _path = filedialog.askdirectory(title=msg)
+    if platform.system() == "Windows":
+        _path = filedialog.askdirectory(title=msg)
+    elif platform.system() == "Darwin":
+        _path = filedialog.askdirectory(title=msg, message=msg)
+    else:
+        _path = filedialog.askdirectory(title=msg)
     if not _path:
         warning = "User aborted directory selection"
         logging.warning(warning)

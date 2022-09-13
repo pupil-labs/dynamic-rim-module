@@ -329,7 +329,6 @@ def pick_point_in_image(rim_dir, npoints=4):
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(points) < npoints:
                 cv2.circle(param, (x, y), 50, (0, 0, 255), -1)
-                cv2.circle(image, (x, y), 50, (0, 0, 255), -1)
                 points.append((x, y))
                 logging.info(f"Picked point: {(x, y)}")
             else:
@@ -343,6 +342,15 @@ def pick_point_in_image(rim_dir, npoints=4):
                     15,
                     2,
                 )
+        elif event == cv2.EVENT_FLAG_RBUTTON:
+            if len(points) > 0:
+                points.pop()
+                logging.info("Removed last point")
+                cv2.addWeighted(param, 0.1, image, 0.9, 0, param)
+                for point in points:
+                    cv2.circle(param, point, 50, (0, 0, 255), -1)
+            else:
+                logging.info("No points to remove")
 
     cv2.namedWindow("Pick the corners of your ROI with double clicks")
     cv2.setMouseCallback(
@@ -353,6 +361,9 @@ def pick_point_in_image(rim_dir, npoints=4):
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
+    # Copy the points to the ref image
+    for point in points:
+        cv2.circle(image, point, 50, (0, 0, 255), -1)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return points, image
 

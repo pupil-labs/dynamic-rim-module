@@ -105,12 +105,6 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Select corners of the screen
     logging.info("Select corners of the screen...")
     corners_screen, ref_img = pick_point_in_image(rim_dir, 4)
-    # Reorder the corners
-    corners_screen = np.array(corners_screen)
-    corners_screen = corners_screen[np.argsort(corners_screen[:, 0])]
-    corners_screen = corners_screen[np.argsort(corners_screen[:, 1])]
-    corners_screen = corners_screen[[0, 1, 3, 2], :]
-    logging.info(corners_screen)
 
     # Compute the perspective transform
     logging.info("Computing the perspective transform...")
@@ -135,7 +129,20 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     ] = pd.DataFrame(xy_transf[0]).set_index(gaze_rim_df.index)
     # Get the patch of the screen
     mask = np.zeros(np.asarray(ref_img.shape)[0:2], dtype=np.uint8)
-    cv2.fillPoly(mask, [corners_screen], (255))
+    cv2.fillPoly(
+        mask,
+        [
+            np.stack(
+                (
+                    corners_screen["upper left"],
+                    corners_screen["upper right"],
+                    corners_screen["lower right"],
+                    corners_screen["lower left"],
+                )
+            )
+        ],
+        (255),
+    )
     _, timg = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
     _screen, _ = cv2.findContours(timg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     # Timestamp matching
@@ -367,6 +374,18 @@ def pick_point_in_image(rim_dir, npoints=4):
     for point in points:
         cv2.circle(image, point, 50, (0, 0, 255), -1)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Reorder the corners
+    points = np.array(points)
+    center = np.average(points, axis=0)
+    diff_points = np.sign(points - center)
+    points = points[np.lexsort((diff_points[:, 1], diff_points[:, 0]))]
+    points = {
+        "upper left": points[0, :],
+        "lower left": points[1, :],
+        "upper right": points[2, :],
+        "lower right": points[3, :],
+    }
+    logging.info(points)
     return points, image
 
 
@@ -380,10 +399,10 @@ def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=Fals
     """
     pnts1 = np.float32(
         [
-            corners_screen[0, :],  # upper left
-            corners_screen[3, :],  # lower left
-            corners_screen[1, :],  # upper right
-            corners_screen[2, :],  # lower right
+            corners_screen["upper left"],
+            corners_screen["lower left"],
+            corners_screen["upper right"],
+            corners_screen["lower right"],
         ]
     )
     if debug:
@@ -437,6 +456,14 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
     :param _recording: If True, the video will be recorded
     :param _label: If True, the videos will be labelled
     """
+    corners_screen = np.stack(
+        (
+            corners_screen["upper left"],
+            corners_screen["upper right"],
+            corners_screen["lower right"],
+            corners_screen["lower left"],
+        )
+    )
     # Decode the first frames and read the max height and width of the videos
     with av.open(et_video_path) as et_video, av.open(sc_video_path) as sc_video:
         _etframe = next(et_video.decode(video=0))

@@ -331,17 +331,17 @@ def pick_point_in_image(rim_dir, npoints=4):
                 cv2.circle(param, (x, y), 50, (0, 0, 255), -1)
                 points.append((x, y))
                 logging.info(f"Picked point: {(x, y)}")
-            else:
-                cv2.putText(
-                    param,
-                    "Done, press Q to continue",
-                    (1000, 1000),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    5,
-                    (0, 0, 255),
-                    15,
-                    2,
-                )
+                if len(points) == npoints:
+                    cv2.putText(
+                        param,
+                        "Done, press Q to continue",
+                        (1000, 1000),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        5,
+                        (0, 0, 255),
+                        15,
+                        2,
+                    )
         elif event == cv2.EVENT_FLAG_RBUTTON:
             if len(points) > 0:
                 points.pop()
@@ -352,12 +352,14 @@ def pick_point_in_image(rim_dir, npoints=4):
             else:
                 logging.info("No points to remove")
 
-    cv2.namedWindow("Pick the corners of your ROI with double clicks")
+    cv2.namedWindow("Pick the corners of your ROI by clicking on the image")
     cv2.setMouseCallback(
-        "Pick the corners of your ROI with double clicks", pick_corners, copy_image
+        "Pick the corners of your ROI by clicking on the image",
+        pick_corners,
+        copy_image,
     )
     while True:
-        cv2.imshow("Pick the corners of your ROI with double clicks", copy_image)
+        cv2.imshow("Pick the corners of your ROI by clicking on the image", copy_image)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()

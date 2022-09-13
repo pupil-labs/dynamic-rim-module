@@ -411,7 +411,7 @@ def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=Fals
     return M
 
 
-def save_videos(
+def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO: Fix
     corners_screen,
     merged,
     ref_img,
@@ -762,7 +762,7 @@ def progress_bar(current, total, label="", bar_length=20):
 def get_path(msg, file):
     root = tk.Tk()
     root.withdraw()
-    _path = filedialog.askdirectory(title=msg, message=msg)
+    _path = filedialog.askdirectory(title=msg)
     assert _path is not None, "No path selected"
     if not os.path.exists(os.path.join(_path, file)):
         logging.error(f"File {file} not found, probably wrong folder")

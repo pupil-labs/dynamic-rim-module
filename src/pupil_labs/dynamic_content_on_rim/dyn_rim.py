@@ -763,9 +763,14 @@ def get_path(msg, file):
     root = tk.Tk()
     root.withdraw()
     _path = filedialog.askdirectory(title=msg)
-    assert _path is not None, "No path selected"
+    if not _path:
+        warning = "User aborted directory selection"
+        logging.warning(warning)
+        raise SystemExit(warning)
     if not os.path.exists(os.path.join(_path, file)):
-        logging.error(f"File {file} not found, probably wrong folder")
+        error = f"Could not find file {file} in selected folder"
+        logging.error(error)
+        raise SystemExit(error)
     return _path
 
 

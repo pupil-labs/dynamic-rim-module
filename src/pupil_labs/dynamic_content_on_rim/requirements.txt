@@ -1,5 +1,0 @@
-av
-pandas
-numpy
-opencv-python
-Pillow

@@ -12,3 +12,8 @@ except PackageNotFoundError:
     pass
 
 __all__ = ["__version__"]
+
+from . import dyn_rim
+
+if __name__ == "__main__":
+    dyn_rim.main()

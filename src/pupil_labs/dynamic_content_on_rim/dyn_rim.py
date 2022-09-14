@@ -47,14 +47,6 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     gaze_rim_df = pd.read_csv(os.path.join(rim_dir, "gaze.csv"))
     sections_rim_df = pd.read_csv(os.path.join(rim_dir, "sections.csv"))
     gaze_rim_df = pd.merge(gaze_rim_df, sections_rim_df)
-    gaze_rim_df.dropna(
-        inplace=True,
-        subset=[
-            "gaze position in reference image x [px]",
-            "gaze position in reference image y [px]",
-        ],
-    )
-    logging.info(gaze_rim_df.head())
 
     # Read the world timestamps and gaze on ET
     logging.info("Reading world timestamps, events, and gaze on ET...")
@@ -66,6 +58,9 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     )
     events_df = pd.read_csv(os.path.join(raw_data_path, "events.csv"))
     gaze_df = pd.read_csv(os.path.join(raw_data_path, "gaze.csv"))
+
+    # Check if files belong to the same recording
+    gaze_rim_df = check_ids(gaze_df, world_timestamps_df, gaze_rim_df)
 
     # Read the videos
     root = tk.Tk()
@@ -790,12 +785,10 @@ def progress_bar(current, total, label="", bar_length=20):
 def get_path(msg, file):
     root = tk.Tk()
     root.withdraw()
-    if platform.system() == "Windows":
-        _path = filedialog.askdirectory(title=msg)
-    elif platform.system() == "Darwin":
-        _path = filedialog.askdirectory(title=msg, message=msg)
-    else:
-        _path = filedialog.askdirectory(title=msg)
+    arguments = {"title": msg}
+    if platform.system() == "Darwin":
+        arguments["message"] = msg
+    _path = filedialog.askdirectory(**arguments)
     if not _path:
         warning = "User aborted directory selection"
         logging.warning(warning)
@@ -809,6 +802,55 @@ def get_path(msg, file):
 
 def isMonotonicInc(a2check):
     return all(a2check[i] <= a2check[i + 1] for i in range(len(a2check) - 1))
+
+
+def check_ids(gaze_df, world_timestamps_df, gaze_rim_df):
+    """
+    Checks if the recording IDs of the gaze data and the world timestamps are the same.
+    :param gaze_df: The gaze data.
+    :param world_timestamps_df: The world timestamps.
+    :param gaze_rim_df: The gaze data from the RIM.
+    returns gaze_rim_df with only the matching ID.
+    """
+    g_ids = gaze_df["recording id"].unique()
+    w_ids = world_timestamps_df["recording id"].unique()
+    rim_ids = gaze_rim_df["recording id"].unique()
+    if g_ids.shape[0] > 1 or w_ids.shape[0] > 1:
+        error_base = f"More than one recording ID"
+        if g_ids.shape[0] > 1:
+            error_end = "in gaze data: {g_ids}"
+        elif w_ids.shape[0] > 1:
+            error_end = "in world timestamps: {w_ids}"
+        logging.error(error_base + error_end)
+        raise SystemExit(error_base + error_end)
+    if not np.isin(rim_ids, g_ids).any():
+        error = """Recording ID of RIM gaze data does not match recording ID
+                        of the Raw data, please check if you selected the 
+                        right folder."""
+        logging.error(error)
+        raise SystemExit(error)
+    else:
+        ID = rim_ids[np.isin(rim_ids, g_ids)][0]
+        logging.info(
+            f"""Recording ID of RIM gaze data matches recording ID of the RAW data
+            id: {ID} """
+        )
+        isID = gaze_rim_df["recording id"] == ID
+        gaze_rim_df.drop(gaze_rim_df.loc[np.invert(isID)].index, inplace=True)
+        # removing NaNs from gaze rim data
+        gaze_rim_df.dropna(
+            inplace=True,
+            subset=[
+                "gaze position in reference image x [px]",
+                "gaze position in reference image y [px]",
+            ],
+        )
+        if gaze_rim_df.empty:
+            error = f"No valid gaze data in RIM gaze data for recording ID {ID}"
+            logging.error(error)
+            raise SystemExit(error)
+        logging.info(gaze_rim_df.head())
+    return gaze_rim_df
 
 
 if __name__ == "__main__":

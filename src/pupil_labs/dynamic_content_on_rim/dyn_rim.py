@@ -815,22 +815,24 @@ def check_ids(gaze_df, world_timestamps_df, gaze_rim_df):
     g_ids = gaze_df["recording id"].unique()
     w_ids = world_timestamps_df["recording id"].unique()
     rim_ids = gaze_rim_df["recording id"].unique()
-    if g_ids.shape[0] > 1 or w_ids.shape[0] > 1:
-        error_base = f"More than one recording ID"
-        if g_ids.shape[0] > 1:
+    if g_ids.shape[0] != 1 or w_ids.shape[0] != 1:
+        error_base = f"None or more than one recording ID found "
+        if g_ids.shape[0] != 1:
             error_end = "in gaze data: {g_ids}"
-        elif w_ids.shape[0] > 1:
+        elif w_ids.shape[0] != 1:
             error_end = "in world timestamps: {w_ids}"
         logging.error(error_base + error_end)
         raise SystemExit(error_base + error_end)
     if not np.isin(rim_ids, g_ids).any():
-        error = """Recording ID of RIM gaze data does not match recording ID
-                        of the Raw data, please check if you selected the 
-                        right folder."""
+        error = (
+            "Recording ID of RIM gaze data does not match recording ID"
+            " of the Raw data, please check if you selected the"
+            " right folder."
+        )
         logging.error(error)
         raise SystemExit(error)
     else:
-        ID = rim_ids[np.isin(rim_ids, g_ids)][0]
+        ID = g_ids[0]
         logging.info(
             f"""Recording ID of RIM gaze data matches recording ID of the RAW data
             id: {ID} """

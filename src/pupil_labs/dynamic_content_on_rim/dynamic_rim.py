@@ -325,33 +325,38 @@ def pick_point_in_image(rim_dir, npoints=4):
     image_path = os.path.join(rim_dir, "reference_image.jpeg")
     # Read the image
     image = cv2.imread(image_path)
+    # Create a downsample image for displaying in the corner selection. 480p height
     copy_image = image.copy()
+    h, w = image.shape[0:2]
+    resize_factor = 480 / h
+    copy_image = cv2.resize(copy_image, (int(w * (480 / h)), 480))
+    backup = copy_image.copy()
     points = []
 
     def pick_corners(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(points) < npoints:
-                cv2.circle(param, (x, y), 50, (0, 0, 255), -1)
+                cv2.circle(param, (x, y), int(50 * resize_factor), (0, 0, 255), -1)
                 points.append((x, y))
                 logging.info(f"Picked point: {(x, y)}")
                 if len(points) == npoints:
                     cv2.putText(
                         param,
                         "Done, press Q to continue",
-                        (1000, 1000),
+                        (int(param.shape[0] / 4), int(param.shape[1] / 2)),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        5,
+                        5 * resize_factor,
                         (0, 0, 255),
-                        15,
+                        int(15 * resize_factor),
                         2,
                     )
         elif event == cv2.EVENT_FLAG_RBUTTON:
             if len(points) > 0:
                 points.pop()
                 logging.info("Removed last point")
-                cv2.addWeighted(param, 0.1, image, 0.9, 0, param)
+                cv2.addWeighted(param, 0.1, backup, 0.9, 0, param)
                 for point in points:
-                    cv2.circle(param, point, 50, (0, 0, 255), -1)
+                    cv2.circle(param, point, int(50 * resize_factor), (0, 0, 255), -1)
             else:
                 logging.info("No points to remove")
 
@@ -363,14 +368,14 @@ def pick_point_in_image(rim_dir, npoints=4):
     )
     while True:
         cv2.imshow("Pick the corners of your ROI by clicking on the image", copy_image)
-        cv2.resizeWindow(
-            "Pick the corners of your ROI by clicking on the image",
-            tk.Tk().winfo_screenwidth(),
-            tk.Tk().winfo_screenheight(),
-        )
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
+    # Get the points back to the original image size
+    points = [
+        (int(point[0] / resize_factor), int(point[1] / resize_factor))
+        for point in points
+    ]
     # Copy the points to the ref image
     for point in points:
         cv2.circle(image, point, 50, (0, 0, 255), -1)
@@ -427,11 +432,6 @@ def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=Fals
         cv2.imshow(
             "TMat",
             cv2.warpPerspective(ref_img, M, (ref_img.shape[1], ref_img.shape[0])),
-        )
-        cv2.resizeWindow(
-            "TMat",
-            tk.Tk().winfo_screenwidth(),
-            tk.Tk().winfo_screenheight(),
         )
 
         cv2.waitKey()
@@ -629,11 +629,6 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             out_ = cv2.normalize(out_, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
             if _visualise:
                 cv2.imshow("Merged Video", out_)
-                cv2.resizeWindow(
-                    "Merged Video",
-                    tk.Tk().winfo_screenwidth(),
-                    tk.Tk().winfo_screenheight(),
-                )
                 if cv2.waitKey(25) & 0xFF == ord("q"):
                     break
             if _recording:

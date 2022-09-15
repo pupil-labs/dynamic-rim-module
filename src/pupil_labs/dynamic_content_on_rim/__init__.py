@@ -10,7 +10,7 @@ except PackageNotFoundError:
 
 __all__ = ["__version__"]
 
-from . import dyn_rim
+from . import dynamic_rim
 
 if __name__ == "__main__":
-    dyn_rim.main()
+    dynamic_rim.main()

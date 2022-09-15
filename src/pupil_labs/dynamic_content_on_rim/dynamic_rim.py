@@ -363,6 +363,11 @@ def pick_point_in_image(rim_dir, npoints=4):
     )
     while True:
         cv2.imshow("Pick the corners of your ROI by clicking on the image", copy_image)
+        cv2.resizeWindow(
+            "Pick the corners of your ROI by clicking on the image",
+            tk.Tk().winfo_screenwidth(),
+            tk.Tk().winfo_screenheight(),
+        )
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
@@ -420,8 +425,15 @@ def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=Fals
         logging.info("Transformation matrix:")
         logging.info(M)
         cv2.imshow(
-            cv2.warpPerspective(ref_img, M, (ref_img.shape[1], ref_img.shape[0]))
+            "TMat",
+            cv2.warpPerspective(ref_img, M, (ref_img.shape[1], ref_img.shape[0])),
         )
+        cv2.resizeWindow(
+            "TMat",
+            tk.Tk().winfo_screenwidth(),
+            tk.Tk().winfo_screenheight(),
+        )
+
         cv2.waitKey()
     return M
 
@@ -609,7 +621,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                         cv2.FONT_HERSHEY_SIMPLEX,
                         1.2,
                         (0, 0, 0),
-                        1,
+                        2,
                         2,
                     )
             # Get the final frame
@@ -617,6 +629,11 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             out_ = cv2.normalize(out_, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
             if _visualise:
                 cv2.imshow("Merged Video", out_)
+                cv2.resizeWindow(
+                    "Merged Video",
+                    tk.Tk().winfo_screenwidth(),
+                    tk.Tk().winfo_screenheight(),
+                )
                 if cv2.waitKey(25) & 0xFF == ord("q"):
                     break
             if _recording:

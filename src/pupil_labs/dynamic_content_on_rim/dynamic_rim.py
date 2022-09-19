@@ -17,6 +17,7 @@ import logging
 import os
 import pathlib
 import platform
+import struct
 import time
 import tkinter as tk
 import uuid
@@ -34,6 +35,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
+verbit = struct.calcsize("P") * 8
 
 
 def main(_scaudio=True, _piaudio=False, _saveCSV=True):
@@ -108,13 +110,14 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Transform the gaze points using M
     logging.info("Transforming the gaze points using M...")
     # Preparing data to transform
+    typeof = np.float64 if verbit == 64 else np.float32
     xy = np.expand_dims(
         gaze_rim_df[
             [
                 "gaze position in reference image x [px]",
                 "gaze position in reference image y [px]",
             ]
-        ].to_numpy(dtype=np.float64),
+        ].to_numpy(dtype=typeof),
         axis=0,
     )
     # Applying the perspective transform
@@ -157,17 +160,17 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Match the timestamps gaze_rim_df, world_timestamps_df, gaze_df, fake_timestamps_ns
     sc_video_df = pd.DataFrame()
     sc_video_df["frame"] = np.arange(sc_frames)
-    sc_video_df["timestamp [ns]"] = sc_timestamps_ns.astype(int)
+    sc_video_df["timestamp [ns]"] = sc_timestamps_ns.astype(float)
     sc_video_df["pts"] = [int(pt) for pt in sc_pts]
     if _scaudio:
         sc_audio_df = pd.DataFrame()
         sc_audio_df["frame"] = np.arange(asc_frames)
-        sc_audio_df["timestamp [ns]"] = asc_timestamps_ns.astype(int)
+        sc_audio_df["timestamp [ns]"] = asc_timestamps_ns.astype(float)
         sc_audio_df["pts"] = [int(pt) for pt in asc_pts]
     if _piaudio:
         et_audio_df = pd.DataFrame()
         et_audio_df["frame"] = np.arange(aet_frames)
-        et_audio_df["timestamp [ns]"] = np.array(aet_ts).astype(int)
+        et_audio_df["timestamp [ns]"] = np.array(aet_ts).astype(float)
         et_audio_df["pts"] = [int(pt) for pt in aet_pts]
 
     et_video_df = pd.DataFrame()
@@ -235,6 +238,15 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
 
 def merge_tables(table1, table2, table3, table4, table5, label1, label2):
     logging.info("Merging audio and image for screen video...")
+    for i, tbl in enumerate([table1, table2, table3, table4, table5]):
+        if tbl is not None and tbl["timestamp [ns]"].dtype != (
+            np.float32 or np.float64
+        ):
+            tbl["timestamp [ns]"] = (
+                np.float64(tbl["timestamp [ns]"])
+                if verbit == 64
+                else np.float32(tbl["timestamp [ns]"])
+            )
     if table2 is not None:
         merged_sc = pd.merge_asof(
             table1,
@@ -702,7 +714,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
     """
     frame = np.asarray(frame, dtype=np.float32)
     frame = frame[:, :, :]
-    xy = xy.to_numpy(dtype=np.int32)
+    xy = xy.to_numpy(dtype=int)
     # Frame to bgr
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     # Add screen overlay and downsize ref image
@@ -724,7 +736,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
             ),
         )
         overlay = frame.copy()
-        cv2.fillPoly(frame, [np.int32(corners_screen)], color)
+        cv2.fillPoly(frame, [(corners_screen.astype(int))], color)
         cv2.addWeighted(frame[roi], alpha, overlay[roi], 1 - alpha, 0, frame[roi])
         # Gazepoint overlay
         frame = cv2.circle(

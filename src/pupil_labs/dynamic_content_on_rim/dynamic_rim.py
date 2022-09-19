@@ -7,27 +7,26 @@ First, ensure you have the required dependencies installed:
 Then run the script:
     python dyn-rim.py
 @author: mgg
-Version 1.0
-Date: 02/09/2022
+Version 1.1
+Date: 19/09/2022
 """
 
+import glob
 import logging
 
 # Importing necessary libraries
 import os
-import pathlib
-import platform
 import struct
 import time
-import tkinter as tk
-import uuid
 from fractions import Fraction
-from tkinter import filedialog
 
 import av
 import cv2
 import numpy as np
 import pandas as pd
+from uitools.get_corners import pick_point_in_image
+from uitools.ui_tools import get_file, get_path, get_savedir, progress_bar
+from video.read import get_frame, read_video_ts
 
 # Preparing the logger
 logging.getLogger(__name__)
@@ -38,11 +37,24 @@ logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
 verbit = struct.calcsize("P") * 8
 
 
-def main(_scaudio=True, _piaudio=False, _saveCSV=True):
-    if _scaudio and _piaudio:
-        raise ValueError("You cannot have both screen audio and PI audio!")
-    # Ask the user to select the RIM folder
-    rim_dir = get_path("Select the RIM directory", "gaze.csv")
+def main(
+    sc_video_path=None,
+    raw_data_path=None,
+    rim_dir=None,
+    corners_screen=None,
+    out_vidpath=None,
+    out_csvpath=None,
+    audio="SC",  # PI or SC
+    _saveCSV=True,
+    _labels=True,
+):
+    if verbit != 64:
+        error = "Sorry, this script only works on 64 bit systems!"
+        logging.error(error)
+        raise Exception(error)
+    logging.info("Starting dynamic RIM script...")
+    # Ask the user to select the RIM folder if none is provided
+    rim_dir = get_path("Select the RIM directory", "gaze.csv", rim_dir)
     start_time = time.time()
     # Read a pandas dataframe from the gaze file
     logging.info("Reading gaze data...")
@@ -53,7 +65,9 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Read the world timestamps and gaze on ET
     logging.info("Reading world timestamps, events, and gaze on ET...")
     raw_data_path = get_path(
-        "Select the video folder in the raw directory", "world_timestamps.csv"
+        "Select the video folder in the raw directory",
+        "world_timestamps.csv",
+        raw_data_path,
     )
     world_timestamps_df = pd.read_csv(
         os.path.join(raw_data_path, "world_timestamps.csv")
@@ -65,29 +79,25 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     gaze_rim_df = check_ids(gaze_df, world_timestamps_df, gaze_rim_df)
 
     # Read the videos
-    root = tk.Tk()
-    root.withdraw()
-    sc_video_path = filedialog.askopenfilename(
-        title="Select the screen video",
-        filetypes=[("Video files", "*.mp4 *.mkv *.avi")],
-    )
-    et_video_path = filedialog.askopenfilename(
-        title="Select the ET video",
-        initialdir=raw_data_path,
-        filetypes=[("Video files", "*.mp4")],
-    )
+    files = glob.glob(os.path.join(raw_data_path, "*.mp4"))
+    if len(files) != 1:
+        error = "There should be only one video in the raw folder!"
+        logging.error(error)
+        raise Exception(error)
+    et_video_path = files[0]
+    sc_video_path = get_file(sc_video_path)
 
     logging.info("Reading screen video...")
-    _, sc_frames, sc_pts, sc_ts = read_screen_video(sc_video_path)
-    if _scaudio:
-        logging.info("Reading screen audio...")
-        _, asc_frames, asc_pts, asc_ts = read_screen_video(sc_video_path, audio=True)
+    _, sc_frames, sc_pts, sc_ts = read_video_ts(sc_video_path)
 
     logging.info("Reading eye tracking video...")
-    _, et_frames, et_pts, et_ts = read_screen_video(et_video_path)
-    if _piaudio:
+    _, et_frames, et_pts, et_ts = read_video_ts(et_video_path)
+    if audio == "PI":
         logging.info("Reading PI audio...")
-        _, aet_frames, aet_pts, aet_ts = read_screen_video(et_video_path, audio=True)
+        _, aet_frames, aet_pts, aet_ts = read_video_ts(et_video_path, audio=True)
+    elif audio == "SC":
+        logging.info("Reading screen audio...")
+        _, asc_frames, asc_pts, asc_ts = read_video_ts(sc_video_path, audio=True)
 
     logging.debug(
         "The screen video had a mean frame pts diff {} (SD: {})".format(
@@ -102,7 +112,7 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
 
     # Select corners of the screen
     logging.info("Select corners of the screen...")
-    corners_screen, ref_img = pick_point_in_image(rim_dir, 4)
+    corners_screen, ref_img = pick_point_in_image(rim_dir, corners_screen, 4)
 
     # Compute the perspective transform
     logging.info("Computing the perspective transform...")
@@ -110,14 +120,13 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Transform the gaze points using M
     logging.info("Transforming the gaze points using M...")
     # Preparing data to transform
-    typeof = np.float64 if verbit == 64 else np.float32
     xy = np.expand_dims(
         gaze_rim_df[
             [
                 "gaze position in reference image x [px]",
                 "gaze position in reference image y [px]",
             ]
-        ].to_numpy(dtype=typeof),
+        ].to_numpy(dtype=np.float32),
         axis=0,
     )
     # Applying the perspective transform
@@ -152,7 +161,7 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Create some timestamps [ns] for the screen video to match, use the start_video_ns
     # and the ts of the screen video
     sc_timestamps_ns = sc_ts + start_video_ns
-    if _scaudio:
+    if audio == "SC":
         asc_timestamps_ns = asc_ts + start_video_ns
     end_video_ns = np.min(
         [np.max(sc_timestamps_ns), np.max(world_timestamps_df["timestamp [ns]"])]
@@ -160,18 +169,19 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     # Match the timestamps gaze_rim_df, world_timestamps_df, gaze_df, fake_timestamps_ns
     sc_video_df = pd.DataFrame()
     sc_video_df["frame"] = np.arange(sc_frames)
-    sc_video_df["timestamp [ns]"] = sc_timestamps_ns.astype(float)
+    sc_video_df["timestamp [ns]"] = sc_timestamps_ns
     sc_video_df["pts"] = [int(pt) for pt in sc_pts]
-    if _scaudio:
-        sc_audio_df = pd.DataFrame()
-        sc_audio_df["frame"] = np.arange(asc_frames)
-        sc_audio_df["timestamp [ns]"] = asc_timestamps_ns.astype(float)
-        sc_audio_df["pts"] = [int(pt) for pt in asc_pts]
-    if _piaudio:
+
+    if audio == "PI":
         et_audio_df = pd.DataFrame()
         et_audio_df["frame"] = np.arange(aet_frames)
-        et_audio_df["timestamp [ns]"] = np.array(aet_ts).astype(float)
+        et_audio_df["timestamp [ns]"] = np.array(aet_ts)
         et_audio_df["pts"] = [int(pt) for pt in aet_pts]
+    elif audio == "SC":
+        sc_audio_df = pd.DataFrame()
+        sc_audio_df["frame"] = np.arange(asc_frames)
+        sc_audio_df["timestamp [ns]"] = asc_timestamps_ns
+        sc_audio_df["pts"] = [int(pt) for pt in asc_pts]
 
     et_video_df = pd.DataFrame()
     et_video_df["frame"] = np.arange(et_frames)
@@ -190,12 +200,13 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
     )
     merged = merged[merged["timestamp [ns]"] <= end_video_ns]
 
-    if _scaudio or _piaudio:
+    if audio == "PI" or "SC":
         logging.info("Creating matched timestamps tables for video:")
-        if _scaudio:
-            tbl = sc_audio_df
-        elif _piaudio:
+        if audio == "PI":
             tbl = et_audio_df
+        elif audio == "SC":
+            tbl = sc_audio_df
+
         merged_audio = merge_tables(
             tbl,
             sc_video_df,
@@ -220,18 +231,14 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
         _screen,
         sc_video_path,
         et_video_path,
+        out_vidpath,
         merged_audio,
-        _scaudio,
+        audio,
+        _labels,
     )
     if _saveCSV:
         logging.info("Saving CSV...")
-        out_csvpath = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            initialdir=pathlib.Path.home(),
-            initialfile=("gaze.csv"),
-            title="Select where to save the output csv file",
-        )
-        gaze_rim_df.to_csv(out_csvpath, index=True)
+        gaze_rim_df.to_csv(get_savedir(out_csvpath, "csv"), index=True)
     logging.info("Mischief managed! ⚡️")
     logging.info("Executed in: %s seconds" % (time.time() - start_time))
 
@@ -239,14 +246,8 @@ def main(_scaudio=True, _piaudio=False, _saveCSV=True):
 def merge_tables(table1, table2, table3, table4, table5, label1, label2):
     logging.info("Merging audio and image for screen video...")
     for i, tbl in enumerate([table1, table2, table3, table4, table5]):
-        if tbl is not None and tbl["timestamp [ns]"].dtype != (
-            np.float32 or np.float64
-        ):
-            tbl["timestamp [ns]"] = (
-                np.float64(tbl["timestamp [ns]"])
-                if verbit == 64
-                else np.float32(tbl["timestamp [ns]"])
-            )
+        if tbl is not None and tbl["timestamp [ns]"].dtype != (np.uint64):
+            tbl["timestamp [ns]"] = np.uint64(tbl["timestamp [ns]"])
     if table2 is not None:
         merged_sc = pd.merge_asof(
             table1,
@@ -278,133 +279,6 @@ def merge_tables(table1, table2, table3, table4, table5, label1, label2):
         merged_vid, merged_gaze, on="timestamp [ns]", suffixes=["_vid", "_gaze"]
     )
     return merged
-
-
-def read_screen_video(video_path, audio=False):
-    """
-    A function to read a video and return the fps,
-    the number of frames, the pts and timestamps.
-    :param video_path: the path to the video
-    """
-    nframes = []
-    # Read the video
-    with av.open(video_path) as video_container:
-        if audio:
-            stream = video_container.streams.audio[0]
-        else:
-            stream = video_container.streams.video[0]
-        fps = stream.average_rate  # alt base_rate or guessed_rate
-        nframes = stream.frames
-        logging.info("Extracting pts...")
-        pts = []
-        ts = []
-        dts = []
-        for packet in video_container.demux(stream):
-            for frame in packet.decode():
-                if frame is not None and frame.pts is not None:
-                    pts.append(frame.pts)
-                    dts.append(frame.dts)
-                    ts.append(
-                        float(
-                            frame.pts * frame.time_base
-                            - stream.start_time * frame.time_base
-                        )
-                        * 1e9
-                    )
-        if not isMonotonicInc(pts):
-            logging.info("Pts are not monotonic increasing!.")
-        if np.array_equal(pts, dts):
-            logging.info("Pts and dts are equal, using pts")
-
-        pts.sort()
-        ts.sort()
-
-        if nframes != len(pts):
-            nframes = len(pts)
-        else:
-            logging.info(f"Video has {nframes} frames")
-    return fps, nframes, pts, ts
-
-
-def pick_point_in_image(rim_dir, npoints=4):
-    """
-    A function to pick the screen corners on the reference image,
-    returns the corners points, and the ref image in openCV
-    :param rim_dir: the directory of the reference image
-    :param npoints: the number of corners to pick
-    """
-    # Pick the image
-    image_path = os.path.join(rim_dir, "reference_image.jpeg")
-    # Read the image
-    image = cv2.imread(image_path)
-    # Create a downsample image for displaying in the corner selection. 480p height
-    copy_image = image.copy()
-    h, w = image.shape[0:2]
-    resize_factor = 480 / h
-    copy_image = cv2.resize(copy_image, (int(w * (480 / h)), 480))
-    backup = copy_image.copy()
-    points = []
-
-    def pick_corners(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if len(points) < npoints:
-                cv2.circle(param, (x, y), int(50 * resize_factor), (0, 0, 255), -1)
-                points.append((x, y))
-                logging.info(f"Picked point: {(x, y)}")
-                if len(points) == npoints:
-                    cv2.putText(
-                        param,
-                        "Done, press Q to continue",
-                        (int(param.shape[0] / 4), int(param.shape[1] / 2)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        5 * resize_factor,
-                        (0, 0, 255),
-                        int(15 * resize_factor),
-                        2,
-                    )
-        elif event == cv2.EVENT_FLAG_RBUTTON:
-            if len(points) > 0:
-                points.pop()
-                logging.info("Removed last point")
-                cv2.addWeighted(param, 0.1, backup, 0.9, 0, param)
-                for point in points:
-                    cv2.circle(param, point, int(50 * resize_factor), (0, 0, 255), -1)
-            else:
-                logging.info("No points to remove")
-
-    cv2.namedWindow("Pick the corners of your ROI by clicking on the image")
-    cv2.setMouseCallback(
-        "Pick the corners of your ROI by clicking on the image",
-        pick_corners,
-        copy_image,
-    )
-    while True:
-        cv2.imshow("Pick the corners of your ROI by clicking on the image", copy_image)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    cv2.destroyAllWindows()
-    # Get the points back to the original image size
-    points = [
-        (int(point[0] / resize_factor), int(point[1] / resize_factor))
-        for point in points
-    ]
-    # Copy the points to the ref image
-    for point in points:
-        cv2.circle(image, point, 50, (0, 0, 255), -1)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    # Reorder the corners
-    points = np.array(points)
-    center = np.average(points, axis=0)
-    diff_points = np.sign(points - center)
-    points = points[np.lexsort((diff_points[:, 1], diff_points[:, 0]))]
-    points = {
-        "upper left": points[0, :],
-        "lower left": points[1, :],
-        "upper right": points[2, :],
-        "lower right": points[3, :],
-    }
-    logging.info(points)
-    return points, image
 
 
 def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=False):
@@ -457,11 +331,12 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
     _screen,
     sc_video_path,
     et_video_path,
+    out_vidpath,
     merged_audio,
-    _scaudio,
+    audio,
+    _labels=True,
     _visualise=False,
     _recording=True,
-    _label=True,
 ):
     """
     A function to plot/record the ref image, eye tracking video and
@@ -474,7 +349,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
     :param et_video_path: The eye tracking video path
     :param _visualise: If True, the video will be visualised
     :param _recording: If True, the video will be recorded
-    :param _label: If True, the videos will be labelled
+    :param _labels: If True, the videos will be labelled
     """
     corners_screen = np.stack(
         (
@@ -491,10 +366,10 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         mwidth = _etframe.width
         _scframe = next(sc_video.decode(video=0))
         if merged_audio is not None:
-            if _scaudio:
-                audio_frame = next(sc_video.decode(audio=0))
-            else:
+            if audio == "PI":
                 audio_frame = next(et_video.decode(audio=0))
+            elif audio == "SC":
+                audio_frame = next(sc_video.decode(audio=0))
         if _scframe.height > mheight:
             mheight = _scframe.height
         if _scframe.width > mwidth:
@@ -517,12 +392,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
     ]
 
     # Select where to store the video
-    out_vidpath = filedialog.asksaveasfilename(
-        defaultextension=".mp4",
-        initialdir=pathlib.Path.home(),
-        initialfile=(str(uuid.uuid4()) + ".mp4"),
-        title="Select where to save the output video",
-    )
+    out_vidpath = get_savedir(out_vidpath, "video")
 
     with av.open(et_video_path) as et_video, av.open(
         sc_video_path
@@ -537,13 +407,13 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         out_video.width = _etframe.width + _scframe.width + refimg_finalwidth
         out_video.pix_fmt = "yuv420p"
         out_video.codec_context.time_base = Fraction(1, 30)
-        if _scaudio and merged_audio is not None:
-            out_audio = out_container.add_stream(
-                codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
-            )
-        elif not _scaudio and merged_audio is not None:
+        if audio == "PI" and merged_audio is not None:
             out_audio = out_container.add_stream(
                 codec_name="aac", rate=et_audio.streams.audio[0].rate, layout="stereo"
+            )
+        elif audio == "SC" and merged_audio is not None:
+            out_audio = out_container.add_stream(
+                codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
             )
 
         out_audio.time_base = out_audio.codec_context.time_base
@@ -606,7 +476,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 c_scvid[1] : c_scvid[1] + _scframe_final.shape[1],
                 :,
             ] = _scframe_final
-            if _label:
+            if _labels:
                 # Add text to the frames
                 y, w, h = 60, 360, 60
                 labels = [
@@ -662,17 +532,17 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             audio_pts = -1
             while idx < merged_audio.shape[0]:
                 row = merged_audio.iloc[idx]
-                if _scaudio:
+                if audio == "PI":
                     audio_frame, audio_pts = get_frame(
-                        sc_audio,
+                        et_audio,
                         int(row["pts_audio"]),
                         audio_pts,
                         audio_frame,
                         audio=True,
                     )
-                else:
+                elif audio == "SC":
                     audio_frame, audio_pts = get_frame(
-                        et_audio,
+                        sc_audio,
                         int(row["pts_audio"]),
                         audio_pts,
                         audio_frame,
@@ -714,7 +584,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
     """
     frame = np.asarray(frame, dtype=np.float32)
     frame = frame[:, :, :]
-    xy = xy.to_numpy(dtype=int)
+    xy = xy.to_numpy(dtype=np.uint64)
     # Frame to bgr
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     # Add screen overlay and downsize ref image
@@ -757,75 +627,6 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
             frame, xy, int(50 * resizefactor), (0, 0, 255), int(10 * resizefactor)
         )
     return frame
-
-
-def get_frame(av_container, pts, last_pts, frame, audio=False):
-    """
-    Gets the frame at the given timestamp.
-    :param av_container: The container of the video.
-    :param pts: The pts of the frame we are looking for.
-    :param last_pts: The last pts of the video readed.
-    :param frame: Last frame decoded.
-    """
-    if audio:
-        strm = av_container.streams.audio[0]
-    else:
-        strm = av_container.streams.video[0]
-    if last_pts < pts:
-        try:
-            for frame in av_container.decode(strm):
-                logging.debug(
-                    f"Frame {frame.pts} read from video and looking for {pts}"
-                )
-                if pts == frame.pts:
-                    last_pts = frame.pts
-                    return frame, last_pts
-                if pts < frame.pts:
-                    logging.warning(f"Frame {pts} not found in video, used {frame.pts}")
-                    last_pts = frame.pts
-                    return frame, last_pts
-        except av.EOFError:
-            logging.info("End of the file")
-            return None, last_pts
-    else:
-        logging.debug("This frame was already decoded")
-        return frame, last_pts
-
-
-def progress_bar(current, total, label="", bar_length=20):
-    """
-    Prints a progress bar.
-    :param current: The current progress.
-    :param total: The total progress.
-    :param bar_length: The length of the progress bar in the cmd.
-    """
-    fraction = current / total
-    arrow = int(fraction * bar_length - 1) * "-" + "✈︎"
-    padding = int(bar_length - len(arrow)) * " "
-    ending = "\n" if current == total else "\r"
-    print(f"Progress {label}: [{arrow}{padding}] {int(fraction*100)}%", end=ending)
-
-
-def get_path(msg, file):
-    root = tk.Tk()
-    root.withdraw()
-    arguments = {"title": msg}
-    if platform.system() == "Darwin":
-        arguments["message"] = msg
-    _path = filedialog.askdirectory(**arguments)
-    if not _path:
-        warning = "User aborted directory selection"
-        logging.warning(warning)
-        raise SystemExit(warning)
-    if not os.path.exists(os.path.join(_path, file)):
-        error = f"Could not find file {file} in selected folder"
-        logging.error(error)
-        raise SystemExit(error)
-    return _path
-
-
-def isMonotonicInc(a2check):
-    return all(a2check[i] <= a2check[i + 1] for i in range(len(a2check) - 1))
 
 
 def check_ids(gaze_df, world_timestamps_df, gaze_rim_df):

@@ -55,7 +55,7 @@ def main(
     corners_screen=None,
     out_vidpath=None,
     out_csvpath=None,
-    audio=audioSources.Screen_Audio,
+    audio=audioSources.Pupil_Invisible_Mic,
     _saveCSV=True,
     _labels=True,
 ):

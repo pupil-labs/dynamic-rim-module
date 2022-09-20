@@ -20,10 +20,13 @@
 .. image:: https://img.shields.io/badge/skeleton-2022-informational
    :target: https://blog.jaraco.com/skeleton
 
-This package allows you to use the `Dynamic RIM` module in Pupil Labs. This is an extension of our `RIM <https://docs.pupil-labs.com/invisible/explainers/enrichments/#reference-image-mapper>`__
-enrichment that allows you to select a display in the reference image and plot the gaze over the content displayed.
+This package allows you to use the Dynamic RIM module in Pupil Labs.
+
+This is an extension of our `RIM <https://docs.pupil-labs.com/invisible/explainers/enrichments/#reference-image-mapper>`__
+enrichment that allows you to select a screen/display in the reference image and plot the gaze over the content displayed on it.
 It will also give you a csv file with the coordinates of the gaze in the screen coordinates.
-To install it use:
+
+To install it, use:
 
 ..  code-block:: python
 
@@ -35,4 +38,4 @@ To run it:
 
     pl-dynamic-rim
 
-See our docs for more information.
+See our `docs <https://docs.pupil-labs.com/>`__ for more information.

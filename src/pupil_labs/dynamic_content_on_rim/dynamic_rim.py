@@ -592,7 +592,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
     """
     frame = np.asarray(frame, dtype=np.float32)
     frame = frame[:, :, :]
-    xy = xy.to_numpy(dtype=np.uint64)
+    xy = xy.to_numpy(dtype=np.int32)
     # Frame to bgr
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     # Add screen overlay and downsize ref image

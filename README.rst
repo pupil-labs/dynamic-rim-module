@@ -4,7 +4,7 @@
 .. image:: https://img.shields.io/pypi/pyversions/pupil-labs-dynamic-rim.svg
    :target: `PyPI link`_
 
-.. _PyPI link: https://pypi.org/project/skeleton
+.. _PyPI link: https://pypi.org/project/pupil-labs-dynamic-rim/
 
 .. image:: https://github.com/pupil-labs/dynamic-rim-module/workflows/tests/badge.svg
    :target: https://github.com/pupil-labs/dynamic-rim-module/actions?query=workflow%3A%22tests%22

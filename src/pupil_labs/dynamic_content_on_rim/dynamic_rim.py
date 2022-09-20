@@ -2,13 +2,6 @@
 Python 3.10 Dynamic RIM Script
 This script is used to plot gaze over a video displayed on RIM
 enrichment eye tracking recording.
-First, ensure you have the required dependencies installed:
-    pip install -r requirements.txt
-Then run the script:
-    python dyn-rim.py
-@author: mgg
-Version 1.1
-Date: 19/09/2022
 """
 
 import glob
@@ -18,15 +11,28 @@ import logging
 import os
 import struct
 import time
+from enum import Enum
 from fractions import Fraction
 
 import av
 import cv2
 import numpy as np
 import pandas as pd
-from uitools.get_corners import pick_point_in_image
-from uitools.ui_tools import get_file, get_path, get_savedir, progress_bar
-from video.read import get_frame, read_video_ts
+
+from pupil_labs.dynamic_content_on_rim.uitools.get_corners import pick_point_in_image
+from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
+    get_file,
+    get_path,
+    get_savedir,
+    progress_bar,
+)
+from pupil_labs.dynamic_content_on_rim.video.read import get_frame, read_video_ts
+
+# Check if they are using a 64 bit architecture
+verbit = struct.calcsize("P") * 8
+if verbit != 64:
+    error = "Sorry, this script only works on 64 bit systems!"
+    raise Exception(error)
 
 # Preparing the logger
 logging.getLogger(__name__)
@@ -34,7 +40,12 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
-verbit = struct.calcsize("P") * 8
+
+
+class audioSources(Enum):
+    No_Audio = 0
+    Pupil_Invisible_Mic = 1  # Pupil Invisible microphone
+    Screen_Audio = 2  # Screen Audio as defined by your recording method
 
 
 def main(
@@ -44,22 +55,23 @@ def main(
     corners_screen=None,
     out_vidpath=None,
     out_csvpath=None,
-    audio="SC",  # PI or SC
+    audio=audioSources.Screen_Audio,
     _saveCSV=True,
     _labels=True,
 ):
-    if verbit != 64:
-        error = "Sorry, this script only works on 64 bit systems!"
+    logging.info("Starting dynamic RIM script...")
+    if audio.name not in audioSources._member_names_:
+        error = f"Unknown audio option {audio}, use {audioSources._member_names_}"
         logging.error(error)
         raise Exception(error)
-    logging.info("Starting dynamic RIM script...")
     # Ask the user to select the RIM folder if none is provided
     rim_dir = get_path("Select the RIM directory", "gaze.csv", rim_dir)
     start_time = time.time()
     # Read a pandas dataframe from the gaze file
     logging.info("Reading gaze data...")
-    gaze_rim_df = pd.read_csv(os.path.join(rim_dir, "gaze.csv"))
-    sections_rim_df = pd.read_csv(os.path.join(rim_dir, "sections.csv"))
+    oftype = {"timestamp [ns]": np.uint64}
+    gaze_rim_df = pd.read_csv(os.path.join(rim_dir, "gaze.csv"), dtype=oftype)
+    sections_rim_df = pd.read_csv(os.path.join(rim_dir, "sections.csv"), dtype=oftype)
     gaze_rim_df = pd.merge(gaze_rim_df, sections_rim_df)
 
     # Read the world timestamps and gaze on ET
@@ -70,10 +82,10 @@ def main(
         raw_data_path,
     )
     world_timestamps_df = pd.read_csv(
-        os.path.join(raw_data_path, "world_timestamps.csv")
+        os.path.join(raw_data_path, "world_timestamps.csv"), dtype=oftype
     )
-    events_df = pd.read_csv(os.path.join(raw_data_path, "events.csv"))
-    gaze_df = pd.read_csv(os.path.join(raw_data_path, "gaze.csv"))
+    events_df = pd.read_csv(os.path.join(raw_data_path, "events.csv"), dtype=oftype)
+    gaze_df = pd.read_csv(os.path.join(raw_data_path, "gaze.csv"), dtype=oftype)
 
     # Check if files belong to the same recording
     gaze_rim_df = check_ids(gaze_df, world_timestamps_df, gaze_rim_df)
@@ -92,12 +104,15 @@ def main(
 
     logging.info("Reading eye tracking video...")
     _, et_frames, et_pts, et_ts = read_video_ts(et_video_path)
-    if audio == "PI":
-        logging.info("Reading PI audio...")
-        _, aet_frames, aet_pts, aet_ts = read_video_ts(et_video_path, audio=True)
-    elif audio == "SC":
-        logging.info("Reading screen audio...")
-        _, asc_frames, asc_pts, asc_ts = read_video_ts(sc_video_path, audio=True)
+    if audio in audioSources:
+        arguments = {"audio": True}
+        if audio == audioSources.Pupil_Invisible_Mic:
+            logging.info("Reading PI audio...")
+            arguments["video_path"] = et_video_path
+        elif audio == audioSources.Screen_Audio:
+            logging.info("Reading screen audio...")
+            arguments["video_path"] = sc_video_path
+        _, audio_frames, audio_pts, audio_ts = read_video_ts(**arguments)
 
     logging.debug(
         "The screen video had a mean frame pts diff {} (SD: {})".format(
@@ -161,8 +176,8 @@ def main(
     # Create some timestamps [ns] for the screen video to match, use the start_video_ns
     # and the ts of the screen video
     sc_timestamps_ns = sc_ts + start_video_ns
-    if audio == "SC":
-        asc_timestamps_ns = asc_ts + start_video_ns
+    if audio == audioSources.Screen_Audio:
+        audio_ts = audio_ts + start_video_ns
     end_video_ns = np.min(
         [np.max(sc_timestamps_ns), np.max(world_timestamps_df["timestamp [ns]"])]
     )
@@ -172,16 +187,11 @@ def main(
     sc_video_df["timestamp [ns]"] = sc_timestamps_ns
     sc_video_df["pts"] = [int(pt) for pt in sc_pts]
 
-    if audio == "PI":
-        et_audio_df = pd.DataFrame()
-        et_audio_df["frame"] = np.arange(aet_frames)
-        et_audio_df["timestamp [ns]"] = np.array(aet_ts)
-        et_audio_df["pts"] = [int(pt) for pt in aet_pts]
-    elif audio == "SC":
-        sc_audio_df = pd.DataFrame()
-        sc_audio_df["frame"] = np.arange(asc_frames)
-        sc_audio_df["timestamp [ns]"] = asc_timestamps_ns
-        sc_audio_df["pts"] = [int(pt) for pt in asc_pts]
+    if audio in audioSources and audio is not audioSources.No_Audio:
+        audio_df = pd.DataFrame()
+        audio_df["frame"] = np.arange(audio_frames)
+        audio_df["timestamp [ns]"] = np.array(audio_ts)
+        audio_df["pts"] = [int(pt) for pt in audio_pts]
 
     et_video_df = pd.DataFrame()
     et_video_df["frame"] = np.arange(et_frames)
@@ -200,15 +210,10 @@ def main(
     )
     merged = merged[merged["timestamp [ns]"] <= end_video_ns]
 
-    if audio == "PI" or "SC":
-        logging.info("Creating matched timestamps tables for video:")
-        if audio == "PI":
-            tbl = et_audio_df
-        elif audio == "SC":
-            tbl = sc_audio_df
-
+    if audio in audioSources and audio != audioSources.No_Audio:
+        logging.info("Creating matched timestamps tables for audio:")
         merged_audio = merge_tables(
-            tbl,
+            audio_df,
             sc_video_df,
             et_video_df,
             gaze_rim_df.sort_values(by=["timestamp [ns]"]),
@@ -247,7 +252,12 @@ def merge_tables(table1, table2, table3, table4, table5, label1, label2):
     logging.info("Merging audio and image for screen video...")
     for i, tbl in enumerate([table1, table2, table3, table4, table5]):
         if tbl is not None and tbl["timestamp [ns]"].dtype != (np.uint64):
-            tbl["timestamp [ns]"] = np.uint64(tbl["timestamp [ns]"])
+            error = "Table {} has a timestamp column with the wrong dtype: {}".format(
+                i,
+                tbl["timestamp [ns]"].dtype,
+            )
+            logging.error(error)
+            raise ValueError(error)
     if table2 is not None:
         merged_sc = pd.merge_asof(
             table1,
@@ -366,9 +376,9 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         mwidth = _etframe.width
         _scframe = next(sc_video.decode(video=0))
         if merged_audio is not None:
-            if audio == "PI":
+            if audio == audioSources.Pupil_Invisible_Mic:
                 audio_frame = next(et_video.decode(audio=0))
-            elif audio == "SC":
+            elif audio == audioSources.Screen_Audio:
                 audio_frame = next(sc_video.decode(audio=0))
         if _scframe.height > mheight:
             mheight = _scframe.height
@@ -407,15 +417,13 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         out_video.width = _etframe.width + _scframe.width + refimg_finalwidth
         out_video.pix_fmt = "yuv420p"
         out_video.codec_context.time_base = Fraction(1, 30)
-        if audio == "PI" and merged_audio is not None:
-            out_audio = out_container.add_stream(
-                codec_name="aac", rate=et_audio.streams.audio[0].rate, layout="stereo"
-            )
-        elif audio == "SC" and merged_audio is not None:
-            out_audio = out_container.add_stream(
-                codec_name="aac", rate=sc_audio.streams.audio[0].rate, layout="stereo"
-            )
-
+        if audio in audioSources and merged_audio is not None:
+            audio_arguments = {"codec_name": "aac", "layout": "stereo"}
+            if audio == audioSources.Pupil_Invisible_Mic:
+                audio_arguments["rate"] = et_audio.streams.audio[0].rate
+            elif audio == audioSources.Screen_Audio:
+                audio_arguments["rate"] = sc_audio.streams.audio[0].rate
+            out_audio = out_container.add_stream(**audio_arguments)
         out_audio.time_base = out_audio.codec_context.time_base
         idx = 0
         _etlpts = -1
@@ -532,7 +540,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             audio_pts = -1
             while idx < merged_audio.shape[0]:
                 row = merged_audio.iloc[idx]
-                if audio == "PI":
+                if audio == audioSources.Pupil_Invisible_Mic:
                     audio_frame, audio_pts = get_frame(
                         et_audio,
                         int(row["pts_audio"]),
@@ -540,7 +548,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                         audio_frame,
                         audio=True,
                     )
-                elif audio == "SC":
+                elif audio == audioSources.Screen_Audio:
                     audio_frame, audio_pts = get_frame(
                         sc_audio,
                         int(row["pts_audio"]),

@@ -25,12 +25,14 @@ enrichment that allows you to select a display in the reference image and plot t
 It will also give you a csv file with the coordinates of the gaze in the screen coordinates.
 To install it use:
 
-..  code-block::python
+..  code-block:: python
+
     pip install pupil-labs-dynamic-rim
 
 To run it:
 
-..  code-block::python
+..  code-block:: python
+
     pl-dynamic-rim
 
 See our docs for more information.

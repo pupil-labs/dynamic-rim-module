@@ -17,6 +17,7 @@ def read_video_ts(video_path, audio=False):
             stream = video_container.streams.audio[0]
         else:
             stream = video_container.streams.video[0]
+        stream.thread_type = "AUTO"
         fps = stream.average_rate  # alt base_rate or guessed_rate
         nframes = stream.frames
         logging.info("Extracting pts...")
@@ -73,6 +74,7 @@ def get_frame(av_container, pts, last_pts, frame, audio=False):
         strm = av_container.streams.audio[0]
     else:
         strm = av_container.streams.video[0]
+    strm.thread_type = "AUTO"
     if last_pts < pts:
         try:
             for frame in av_container.decode(strm):

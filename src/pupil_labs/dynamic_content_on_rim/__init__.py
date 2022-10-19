@@ -1,6 +1,11 @@
 """Top-level entry-point for the <dynamic_content_on_rim> package"""
 
-from importlib.metadata import PackageNotFoundError, version
+import sys
+
+if sys.version_info < (3, 8):
+  from importlib_metadata import PackageNotFoundError, version
+else:
+  from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("pupil-labs-dynamic-rim")

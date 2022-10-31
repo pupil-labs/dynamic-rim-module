@@ -178,6 +178,8 @@ def main(
     sc_timestamps_ns = sc_ts + start_video_ns
     if audio == audioSources.Screen_Audio:
         audio_ts = audio_ts + start_video_ns
+    elif audio == audioSources.Pupil_Invisible_Mic:
+        audio_ts = audio_ts + np.min(world_timestamps_df["timestamp [ns]"])
     end_video_ns = np.min(
         [np.max(sc_timestamps_ns), np.max(world_timestamps_df["timestamp [ns]"])]
     )
@@ -222,6 +224,7 @@ def main(
             "_video",
         )
         merged_audio = merged_audio[merged_audio["timestamp [ns]"] <= end_video_ns]
+        merged_audio = merged_audio[merged_audio["timestamp [ns]"] >= start_video_ns]
     else:
         merged_audio = None
 
@@ -592,9 +595,16 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
     """
     frame = np.asarray(frame, dtype=np.float32)
     frame = frame[:, :, :]
-    xy = xy.to_numpy(dtype=np.int32)
-    # Frame to bgr
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    # Check for NaNs
+    if np.isnan(xy[0]) or np.isnan(xy[1]):
+        if str == "Reference Image":
+            frame = cv2.resize(
+                frame, (int(frame.shape[1] * mheight / frame.shape[0]), int(mheight))
+            )  # col, rows
+            logging.info("Resized ref image, nothing else as xy contained a NaN value")
+        return frame
+    xy = xy.to_numpy(dtype=np.int32)
     # Add screen overlay and downsize ref image
     if str == "Reference Image":
         if cv2.pointPolygonTest(_screen[0], (int(xy[0]), int(xy[1])), False) == 1:

@@ -22,20 +22,17 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
         fps = stream.average_rate  # alt base_rate or guessed_rate
         nframes = stream.frames
         logging.info("Extracting pts...")
-        pts, dts, ts = np.empty([3, 0, 0], dtype=np.uint64)
+        pts, dts, ts = (list() for i in range(3))
         for packet in video_container.demux(stream):
             for frame in packet.decode():
                 if frame is not None and frame.pts is not None:
-                    pts = np.append(pts, np.uint64(frame.pts))
-                    dts = (
-                        np.append(dts, np.uint64(frame.dts))
-                        if frame.dts is not None
-                        else logging.info(
-                            f"Decoding timestamp is missing at frame {len(pts)}"
-                        )
+                    pts.append(np.uint64(frame.pts))
+                    dts.append(
+                        np.uint64(frame.dts)
+                    ) if frame.dts is not None else logging.info(
+                        f"Decoding timestamp is missing at frame {len(pts)}"
                     )
-                    ts = np.append(
-                        ts,
+                    ts.append(
                         np.uint64(
                             (
                                 frame.pts * frame.time_base
@@ -44,13 +41,15 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
                             * 1e9
                         ),
                     )
+        pts, dts, ts = np.array(pts), np.array(dts), np.array(ts)
         if not isMonotonicInc(pts):
             logging.info("Pts are not monotonic increasing!.")
         if np.array_equal(pts, dts):
             logging.info("Pts and dts are equal, using pts")
 
-        pts.sort()
-        ts.sort()
+        idc = pts.argsort()
+        pts = pts[idc]
+        ts = ts[idc]
 
         if nframes != len(pts):
             nframes = len(pts)

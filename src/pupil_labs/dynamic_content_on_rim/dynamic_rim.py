@@ -602,7 +602,9 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
             frame = cv2.resize(
                 frame, (int(frame.shape[1] * mheight / frame.shape[0]), int(mheight))
             )  # col, rows
-            logging.info("Resized ref image, nothing else as xy contained a NaN value")
+            logging.info(
+                "Resized reference image, gaze not plotted as xy contained a NaN value"
+            )
         return frame
     xy = xy.to_numpy(dtype=np.int32)
     # Add screen overlay and downsize ref image

@@ -2,6 +2,7 @@ v1.0.2
 ---
 Fixed audio sync when using the audio from Pupil Invisible
 Added sanity check in case gaze coord are not available
+Improved speed in read_video_ts()
 
 v1.0.1
 ---

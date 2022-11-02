@@ -26,22 +26,22 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
         for packet in video_container.demux(stream):
             for frame in packet.decode():
                 if frame is not None and frame.pts is not None:
-                    pts.append(np.uint64(frame.pts))
-                    dts.append(
-                        np.uint64(frame.dts)
-                    ) if frame.dts is not None else logging.info(
+                    pts.append(frame.pts)
+                    dts.append(frame.dts) if frame.dts is not None else logging.info(
                         f"Decoding timestamp is missing at frame {len(pts)}"
                     )
                     ts.append(
-                        np.uint64(
-                            (
-                                frame.pts * frame.time_base
-                                - stream.start_time * frame.time_base
-                            )
-                            * 1e9
-                        ),
+                        (
+                            frame.pts * frame.time_base
+                            - stream.start_time * frame.time_base
+                        )
+                        * 1e9
                     )
-        pts, dts, ts = np.array(pts), np.array(dts), np.array(ts)
+        pts, dts, ts = (
+            np.array(pts, dtype=np.uint64),
+            np.array(dts, dtype=np.uint64),
+            np.array(ts, dtype=np.uint64),
+        )
         if not isMonotonicInc(pts):
             logging.info("Pts are not monotonic increasing!.")
         if np.array_equal(pts, dts):

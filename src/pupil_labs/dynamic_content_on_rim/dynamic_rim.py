@@ -3,11 +3,9 @@ Python 3.10 Dynamic RIM Script
 This script is used to plot gaze over a video displayed on RIM
 enrichment eye tracking recording.
 """
-
+import argparse
 import glob
 import logging
-
-# Importing necessary libraries
 import os
 import struct
 import time
@@ -18,13 +16,15 @@ import av
 import cv2
 import numpy as np
 import pandas as pd
+from rich.logging import RichHandler
+from rich.progress import Progress
 
 from pupil_labs.dynamic_content_on_rim.uitools.get_corners import pick_point_in_image
 from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     get_file,
     get_path,
     get_savedir,
-    progress_bar,
+    rich_df,
 )
 from pupil_labs.dynamic_content_on_rim.video.read import get_frame, read_video_ts
 
@@ -37,7 +37,7 @@ if verbit != 64:
 # Preparing the logger
 logging.getLogger(__name__)
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(message)s", level=logging.INFO, datefmt="[%X]", handlers=[RichHandler()]
 )
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
 
@@ -48,70 +48,100 @@ class audioSources(Enum):
     Screen_Audio = 2  # Screen Audio as defined by your recording method
 
 
-def main(
-    sc_video_path=None,
-    raw_data_path=None,
-    rim_dir=None,
-    corners_screen=None,
-    out_vidpath=None,
-    out_csvpath=None,
-    audio=audioSources.Pupil_Invisible_Mic,
-    _saveCSV=True,
-    _labels=True,
-):
-    logging.info("Starting dynamic RIM script...")
+def main():
+    parser = argparse.ArgumentParser(description="Pupil Labs - Dynamic RIM Module")
+    parser.add_argument("--screen_video_path", default=None, type=str)
+    parser.add_argument("--raw_folder_path", default=None, type=str)
+    parser.add_argument("--rim_folder_path", default=None, type=str)
+    parser.add_argument("--corners_screen", default=None, type=str)
+    parser.add_argument("--out_video_path", default=None, type=str)
+    parser.add_argument("--out_csv_path", default=None, type=str)
+    parser.add_argument(
+        "--audio",
+        default="Pupil_Invisible_Mic",
+        choices=["No_Audio", "Pupil_Invisible_Mic", "Screen_Audio"],
+        type=str,
+    )
+    parser.add_argument("--saveCSV", default=True, type=bool)
+    parser.add_argument("--labels", default=True, type=bool)
+    args = parser.parse_args()
+    audio = audioSources[args.audio]
+    logging.info(
+        "[white bold on #0d122a]◎ Dynamic RIM Module by Pupil Labs[/]",
+        extra={"markup": True},
+    )
+    logging.info(f"Arguments: {args}")
     if audio.name not in audioSources._member_names_:
         error = f"Unknown audio option {audio}, use {audioSources._member_names_}"
         logging.error(error)
         raise Exception(error)
     # Ask the user to select the RIM folder if none is provided
-    rim_dir = get_path("Select the RIM directory", "gaze.csv", rim_dir)
+    args.rim_folder_path = get_path(
+        "Select the RIM directory", "gaze.csv", args.rim_folder_path
+    )
     start_time = time.time()
     # Read a pandas dataframe from the gaze file
     logging.info("Reading gaze data...")
     oftype = {"timestamp [ns]": np.uint64}
-    gaze_rim_df = pd.read_csv(os.path.join(rim_dir, "gaze.csv"), dtype=oftype)
-    sections_rim_df = pd.read_csv(os.path.join(rim_dir, "sections.csv"), dtype=oftype)
+    gaze_rim_df = pd.read_csv(
+        os.path.join(args.rim_folder_path, "gaze.csv"), dtype=oftype
+    )
+    sections_rim_df = pd.read_csv(
+        os.path.join(args.rim_folder_path, "sections.csv"), dtype=oftype
+    )
     gaze_rim_df = pd.merge(gaze_rim_df, sections_rim_df)
 
     # Read the world timestamps and gaze on ET
     logging.info("Reading world timestamps, events, and gaze on ET...")
-    raw_data_path = get_path(
+    args.raw_folder_path = get_path(
         "Select the video folder in the raw directory",
         "world_timestamps.csv",
-        raw_data_path,
+        args.raw_folder_path,
     )
     world_timestamps_df = pd.read_csv(
-        os.path.join(raw_data_path, "world_timestamps.csv"), dtype=oftype
+        os.path.join(args.raw_folder_path, "world_timestamps.csv"), dtype=oftype
     )
-    events_df = pd.read_csv(os.path.join(raw_data_path, "events.csv"), dtype=oftype)
-    gaze_df = pd.read_csv(os.path.join(raw_data_path, "gaze.csv"), dtype=oftype)
+    events_df = pd.read_csv(
+        os.path.join(args.raw_folder_path, "events.csv"), dtype=oftype
+    )
+    gaze_df = pd.read_csv(os.path.join(args.raw_folder_path, "gaze.csv"), dtype=oftype)
 
     # Check if files belong to the same recording
     gaze_rim_df = check_ids(gaze_df, world_timestamps_df, gaze_rim_df)
 
     # Read the videos
-    files = glob.glob(os.path.join(raw_data_path, "*.mp4"))
+    files = glob.glob(os.path.join(args.raw_folder_path, "*.mp4"))
     if len(files) != 1:
         error = "There should be only one video in the raw folder!"
         logging.error(error)
         raise Exception(error)
     et_video_path = files[0]
-    sc_video_path = get_file(sc_video_path)
+    args.screen_video_path = get_file(args.screen_video_path)
+    logging.info(
+        "[white bold on #0d122a]Reading screen recorded video...[/]",
+        extra={"markup": True},
+    )
+    _, sc_frames, sc_pts, sc_ts = read_video_ts(args.screen_video_path)
 
-    logging.info("Reading screen video...")
-    _, sc_frames, sc_pts, sc_ts = read_video_ts(sc_video_path)
-
-    logging.info("Reading eye tracking video...")
+    logging.info(
+        "[white bold on #0d122a]Reading eye tracking (scene camera) video...[/]",
+        extra={"markup": True},
+    )
     _, et_frames, et_pts, et_ts = read_video_ts(et_video_path)
     if audio in audioSources:
         arguments = {"audio": True}
         if audio == audioSources.Pupil_Invisible_Mic:
-            logging.info("Reading PI audio...")
+            logging.info(
+                "[white bold on #0d122a]Reading PI audio...[/]",
+                extra={"markup": True},
+            )
             arguments["video_path"] = et_video_path
         elif audio == audioSources.Screen_Audio:
-            logging.info("Reading screen audio...")
-            arguments["video_path"] = sc_video_path
+            logging.info(
+                "[white bold on #0d122a]Reading audio from screen recording...[/]",
+                extra={"markup": True},
+            )
+            arguments["video_path"] = args.screen_video_path
         _, audio_frames, audio_pts, audio_ts = read_video_ts(**arguments)
 
     logging.debug(
@@ -127,11 +157,15 @@ def main(
 
     # Select corners of the screen
     logging.info("Select corners of the screen...")
-    corners_screen, ref_img = pick_point_in_image(rim_dir, corners_screen, 4)
+    args.corners_screen, ref_img = pick_point_in_image(
+        args.rim_folder_path, args.corners_screen, 4
+    )
 
     # Compute the perspective transform
     logging.info("Computing the perspective transform...")
-    M = get_perspective_transform(corners_screen, ref_img, sc_video_path, False)
+    M = get_perspective_transform(
+        args.corners_screen, ref_img, args.screen_video_path, False
+    )
     # Transform the gaze points using M
     logging.info("Transforming the gaze points using M...")
     # Preparing data to transform
@@ -157,10 +191,10 @@ def main(
         [
             np.stack(
                 (
-                    corners_screen["upper left"],
-                    corners_screen["upper right"],
-                    corners_screen["lower right"],
-                    corners_screen["lower left"],
+                    args.corners_screen["upper left"],
+                    args.corners_screen["upper right"],
+                    args.corners_screen["lower right"],
+                    args.corners_screen["lower left"],
                 )
             )
         ],
@@ -228,27 +262,31 @@ def main(
     else:
         merged_audio = None
 
-    logging.info(merged.describe().transpose())
+    logging.debug(merged.describe().transpose())
 
     # Plot the videos
     logging.info("Plotting/Recording...")
     save_videos(
-        corners_screen,
+        args.corners_screen,
         merged,
         ref_img,
         _screen,
-        sc_video_path,
+        args.screen_video_path,
         et_video_path,
-        out_vidpath,
+        args.out_video_path,
         merged_audio,
         audio,
-        _labels,
+        args.labels,
     )
-    if _saveCSV:
+    if args.saveCSV:
         logging.info("Saving CSV...")
-        gaze_rim_df.to_csv(get_savedir(out_csvpath, "csv"), index=True)
-    logging.info("Mischief managed! ⚡️")
+        gaze_rim_df.to_csv(get_savedir(args.out_csv_path, "csv"), index=True)
+    logging.info("")
     logging.info("Executed in: %s seconds" % (time.time() - start_time))
+    logging.info(
+        "[white bold on #0d122a]◎ Mischief managed! ⚡️[/]",
+        extra={"markup": True},
+    )
 
 
 def merge_tables(table1, table2, table3, table4, table5, label1, label2):
@@ -413,7 +451,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         et_video_path
     ) as et_audio, av.open(
         out_vidpath, "w"
-    ) as out_container:
+    ) as out_container, Progress() as progress_bar:
         out_container.metadata["title"] = "Merged video"
         out_video = out_container.add_stream("libx264", rate=30, options={"crf": "18"})
         out_video.height = mheight
@@ -431,6 +469,9 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         idx = 0
         _etlpts = -1
         _sclpts = -1
+        merge_videos_task = progress_bar.add_task(
+            "🎥 Merging videos", total=merged.shape[0]
+        )
         while idx < merged.shape[0]:
             row = merged.iloc[idx]
             _etframe, _etlpts = get_frame(
@@ -531,16 +572,19 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 out_frame = av.VideoFrame.from_ndarray(out_, format="rgb24")
                 for packet in out_video.encode(out_frame):
                     out_container.mux(packet)
-
-                progress_bar(idx, merged.shape[0], "encoding video")
+                progress_bar.advance(merge_videos_task)
             idx += 1
         # Flush the encoder
         if _recording:
             for packet in out_video.encode(None):
                 out_container.mux(packet)
+        progress_bar.stop_task(merge_videos_task)
         if merged_audio is not None and _recording:
             idx = 0
             audio_pts = -1
+            merge_audio_task = progress_bar.add_task(
+                "🔉 Merging audio", total=merged_audio.shape[0]
+            )
             while idx < merged_audio.shape[0]:
                 row = merged_audio.iloc[idx]
                 if audio == audioSources.Pupil_Invisible_Mic:
@@ -571,13 +615,14 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                     aframes = out_audio.encode(audio_frame)
                     out_container.mux(aframes)
 
-                progress_bar(idx, merged_audio.shape[0], label=" encoding audio")
+                progress_bar.advance(merge_audio_task)
                 idx += 1
             # After loop finished flush
             for packet in out_audio.encode(None):
                 out_container.mux(packet)
         if _recording:
             out_container.close()
+        progress_bar.stop_task(merge_audio_task)
         logging.info("Video saved to: " + out_vidpath)
 
 
@@ -696,7 +741,7 @@ def check_ids(gaze_df, world_timestamps_df, gaze_rim_df):
             error = f"No valid gaze data in RIM gaze data for recording ID {ID}"
             logging.error(error)
             raise SystemExit(error)
-        logging.info(gaze_rim_df.head())
+        rich_df(gaze_rim_df.head())
     return gaze_rim_df
 
 

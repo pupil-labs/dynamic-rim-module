@@ -2,6 +2,7 @@ import logging
 
 import av
 import numpy as np
+from rich.progress import Progress
 
 
 def read_video_ts(video_path, audio=False, auto_thread_type=True):
@@ -12,7 +13,7 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
     """
     nframes = []
     # Read the video
-    with av.open(video_path) as video_container:
+    with av.open(video_path) as video_container, Progress() as progress:
         if audio:
             stream = video_container.streams.audio[0]
         else:
@@ -23,6 +24,7 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
         nframes = stream.frames
         logging.info("Extracting pts...")
         pts, dts, ts = (list() for i in range(3))
+        decode_task = progress.add_task("👓 Decoding...", total=nframes)
         for packet in video_container.demux(stream):
             for frame in packet.decode():
                 if frame is not None and frame.pts is not None:
@@ -37,6 +39,7 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
                         )
                         * 1e9
                     )
+            progress.advance(decode_task)
         pts, dts, ts = (
             np.array(pts, dtype=np.uint64),
             np.array(dts, dtype=np.uint64),

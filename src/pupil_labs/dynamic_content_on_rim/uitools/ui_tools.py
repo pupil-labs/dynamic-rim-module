@@ -5,6 +5,12 @@ import platform
 import tkinter as tk
 import uuid
 from tkinter import filedialog
+from typing import Optional
+
+import pandas as pd
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 
 def get_path(msg, file, _path):
@@ -56,15 +62,28 @@ def get_savedir(path, type):
     return path
 
 
-def progress_bar(current, total, label="", bar_length=20):
-    """
-    Prints a progress bar.
-    :param current: The current progress.
-    :param total: The total progress.
-    :param bar_length: The length of the progress bar in the cmd.
-    """
-    fraction = current / total
-    arrow = int(fraction * bar_length - 1) * "-" + "✈︎"
-    padding = int(bar_length - len(arrow)) * " "
-    ending = "\n" if current == total else "\r"
-    print(f"Progress {label}: [{arrow}{padding}] {int(fraction*100)}%", end=ending)
+def rich_df(
+    pandas_dataframe: pd.DataFrame,
+    show_index: bool = True,
+    index_name: Optional[str] = None,
+) -> Table:
+    """Based on https://gist.github.com/neelabalan/33ab34cf65b43e305c3f12ec6db05938"""
+    rich_table = Table(show_header=True, header_style="bold magenta")
+
+    if show_index:
+        index_name = str(index_name) if index_name else ""
+        rich_table.add_column(index_name)
+
+    for column in pandas_dataframe.columns:
+        rich_table.add_column(str(column))
+
+    for index, value_list in enumerate(pandas_dataframe.values.tolist()):
+        row = [str(index)] if show_index else []
+        row += [str(x) for x in value_list]
+        rich_table.add_row(*row)
+
+    rich_table.row_styles = ["none", "dim"]
+    rich_table.box = box.SIMPLE_HEAD
+    console = Console(width=150)
+    console.print(rich_table)
+    return rich_table

@@ -1,3 +1,9 @@
+v1.0.3
+---
+Removed old progress bar.
+Added rich for proper logging formatting 🎩
+Added argument parser 📝, so you can pass them on the command line if you are into that.
+
 v1.0.2
 ---
 Fixed audio sync when using the audio from Pupil Invisible

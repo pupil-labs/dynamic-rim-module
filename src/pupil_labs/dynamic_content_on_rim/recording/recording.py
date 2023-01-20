@@ -9,10 +9,11 @@ import simpleobsws
 from pupil_labs.realtime_api import Device, Network, StatusUpdateNotifier
 from pupil_labs.realtime_api.models import Recording
 from pupil_labs.realtime_api.time_echo import TimeOffsetEstimator
+from rich.logging import RichHandler
 
 logging.getLogger(__name__)
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(message)s", level=logging.INFO, datefmt="[%X]", handlers=[RichHandler()]
 )
 
 

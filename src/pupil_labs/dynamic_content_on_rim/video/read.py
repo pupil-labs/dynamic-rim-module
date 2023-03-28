@@ -40,13 +40,14 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
                         * 1e9
                     )
             progress.advance(decode_task)
+            progress.refresh()
         pts, dts, ts = (
             np.array(pts, dtype=np.uint64),
             np.array(dts, dtype=np.uint64),
             np.array(ts, dtype=np.uint64),
         )
         if not isMonotonicInc(pts):
-            logging.info("Pts are not monotonic increasing!.")
+            logging.warning("Pts are not monotonic increasing!.")
         if np.array_equal(pts, dts):
             logging.info("Pts and dts are equal, using pts")
 

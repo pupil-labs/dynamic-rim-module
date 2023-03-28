@@ -3,13 +3,11 @@ Python 3.10 Dynamic RIM Script
 This script is used to plot gaze over a video displayed on RIM
 enrichment eye tracking recording.
 """
-import argparse
 import glob
 import logging
 import os
 import struct
 import time
-from enum import Enum
 from fractions import Fraction
 
 import av
@@ -27,6 +25,7 @@ from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     rich_df,
 )
 from pupil_labs.dynamic_content_on_rim.video.read import get_frame, read_video_ts
+from pupil_labs.dynamic_content_on_rim.parser import init_parser, audioSources
 
 # Check if they are using a 64 bit architecture
 verbit = struct.calcsize("P") * 8
@@ -42,28 +41,8 @@ logging.basicConfig(
 logging.getLogger("libav.swscaler").setLevel(logging.ERROR)
 
 
-class audioSources(Enum):
-    No_Audio = 0
-    Pupil_Invisible_Mic = 1  # Pupil Invisible microphone
-    Screen_Audio = 2  # Screen Audio as defined by your recording method
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Pupil Labs - Dynamic RIM Module")
-    parser.add_argument("--screen_video_path", default=None, type=str)
-    parser.add_argument("--raw_folder_path", default=None, type=str)
-    parser.add_argument("--rim_folder_path", default=None, type=str)
-    parser.add_argument("--corners_screen", default=None, type=str)
-    parser.add_argument("--out_video_path", default=None, type=str)
-    parser.add_argument("--out_csv_path", default=None, type=str)
-    parser.add_argument(
-        "--audio",
-        default="Pupil_Invisible_Mic",
-        choices=["No_Audio", "Pupil_Invisible_Mic", "Screen_Audio"],
-        type=str,
-    )
-    parser.add_argument("--saveCSV", default=True, type=bool)
-    parser.add_argument("--labels", default=True, type=bool)
+    parser = init_parser()
     args = parser.parse_args()
     audio = audioSources[args.audio]
     logging.info(
@@ -115,7 +94,7 @@ def main():
         error = "There should be only one video in the raw folder!"
         logging.error(error)
         raise Exception(error)
-    et_video_path = files[0]
+    args.et_video_path = files[0]
     args.screen_video_path = get_file(args.screen_video_path)
     logging.info(
         "[white bold on #0d122a]Reading screen recorded video...[/]",
@@ -127,15 +106,15 @@ def main():
         "[white bold on #0d122a]Reading eye tracking (scene camera) video...[/]",
         extra={"markup": True},
     )
-    _, et_frames, et_pts, et_ts = read_video_ts(et_video_path)
+    _, et_frames, et_pts, et_ts = read_video_ts(args.et_video_path)
     if audio in audioSources:
         arguments = {"audio": True}
-        if audio == audioSources.Pupil_Invisible_Mic:
+        if audio == audioSources.Device_Mic:
             logging.info(
                 "[white bold on #0d122a]Reading PI audio...[/]",
                 extra={"markup": True},
             )
-            arguments["video_path"] = et_video_path
+            arguments["video_path"] = args.et_video_path
         elif audio == audioSources.Screen_Audio:
             logging.info(
                 "[white bold on #0d122a]Reading audio from screen recording...[/]",
@@ -163,9 +142,7 @@ def main():
 
     # Compute the perspective transform
     logging.info("Computing the perspective transform...")
-    M = get_perspective_transform(
-        args.corners_screen, ref_img, args.screen_video_path, False
-    )
+    M = get_perspective_transform(args, ref_img, False)
     # Transform the gaze points using M
     logging.info("Transforming the gaze points using M...")
     # Preparing data to transform
@@ -212,7 +189,7 @@ def main():
     sc_timestamps_ns = sc_ts + start_video_ns
     if audio == audioSources.Screen_Audio:
         audio_ts = audio_ts + start_video_ns
-    elif audio == audioSources.Pupil_Invisible_Mic:
+    elif audio == audioSources.Device_Mic:
         audio_ts = audio_ts + np.min(world_timestamps_df["timestamp [ns]"])
     end_video_ns = np.min(
         [np.max(sc_timestamps_ns), np.max(world_timestamps_df["timestamp [ns]"])]
@@ -266,18 +243,7 @@ def main():
 
     # Plot the videos
     logging.info("Plotting/Recording...")
-    save_videos(
-        args.corners_screen,
-        merged,
-        ref_img,
-        _screen,
-        args.screen_video_path,
-        et_video_path,
-        args.out_video_path,
-        merged_audio,
-        audio,
-        args.labels,
-    )
+    save_videos(args, merged, ref_img, _screen, merged_audio, audio)
     if args.saveCSV:
         logging.info("Saving CSV...")
         gaze_rim_df.to_csv(get_savedir(args.out_csv_path, "csv"), index=True)
@@ -332,26 +298,26 @@ def merge_tables(table1, table2, table3, table4, table5, label1, label2):
     return merged
 
 
-def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=False):
+def get_perspective_transform(args, ref_img, debug=False):
     """
     A function to get the perspective transform between the screen
     and the reference image using OpenCV
-    :param corners_screen: corners of the screen coordinates
+    :param args.corners_screen: corners of the screen coordinates
     :param ref_img: reference image
-    :param sc_video_path: path to the screen video
+    :param args.screen_video_path: path to the screen video
     """
     pnts1 = np.float32(
         [
-            corners_screen["upper left"],
-            corners_screen["lower left"],
-            corners_screen["upper right"],
-            corners_screen["lower right"],
+            args.corners_screen["upper left"],
+            args.corners_screen["lower left"],
+            args.corners_screen["upper right"],
+            args.corners_screen["lower right"],
         ]
     )
     if debug:
         img = ref_img
     else:
-        with av.open(sc_video_path) as video_container:
+        with av.open(args.screen_video_path) as video_container:
             img = next(video_container.decode(video=0)).to_image()
     pnts2 = np.float32(
         [
@@ -376,48 +342,42 @@ def get_perspective_transform(corners_screen, ref_img, sc_video_path, debug=Fals
 
 
 def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO: Fix
-    corners_screen,
+    args,
     merged,
     ref_img,
     _screen,
-    sc_video_path,
-    et_video_path,
-    out_vidpath,
     merged_audio,
     audio,
-    _labels=True,
-    _visualise=False,
     _recording=True,
 ):
     """
     A function to plot/record the ref image, eye tracking video and
     the screen recorded video with a gaze overlay, as a cv2.
-    :param corners_screen: The corners of the screen in the reference image
+
     :param merged: The merged dataframe
     :param ref_img: The reference image
     :param _screen: The screen contour in openCV format
-    :param sc_video_path: The screen recorded video path
-    :param et_video_path: The eye tracking video path
-    :param _visualise: If True, the video will be visualised
-    :param _recording: If True, the video will be recorded
     :param _labels: If True, the videos will be labelled
     """
-    corners_screen = np.stack(
+
+    args.corners_screen = np.stack(
         (
-            corners_screen["upper left"],
-            corners_screen["upper right"],
-            corners_screen["lower right"],
-            corners_screen["lower left"],
+            args.corners_screen["upper left"],
+            args.corners_screen["upper right"],
+            args.corners_screen["lower right"],
+            args.corners_screen["lower left"],
         )
     )
     # Decode the first frames and read the max height and width of the videos
-    with av.open(et_video_path) as et_video, av.open(sc_video_path) as sc_video:
+    with av.open(args.et_video_path) as et_video, av.open(
+        args.screen_video_path
+    ) as sc_video:
         _etframe = next(et_video.decode(video=0))
         mheight = _etframe.height
         mwidth = _etframe.width
         _scframe = next(sc_video.decode(video=0))
         if merged_audio is not None:
-            if audio == audioSources.Pupil_Invisible_Mic:
+            if audio == audioSources.Device_Mic:
                 audio_frame = next(et_video.decode(audio=0))
             elif audio == audioSources.Screen_Audio:
                 audio_frame = next(sc_video.decode(audio=0))
@@ -443,14 +403,14 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
     ]
 
     # Select where to store the video
-    out_vidpath = get_savedir(out_vidpath, "video")
+    args.out_video_path = get_savedir(args.out_video_path, "video")
 
-    with av.open(et_video_path) as et_video, av.open(
-        sc_video_path
-    ) as sc_video, av.open(sc_video_path) as sc_audio, av.open(
-        et_video_path
+    with av.open(args.et_video_path) as et_video, av.open(
+        args.screen_video_path,
+    ) as sc_video, av.open(args.screen_video_path) as sc_audio, av.open(
+        args.et_video_path
     ) as et_audio, av.open(
-        out_vidpath, "w"
+        args.out_video_path, "w"
     ) as out_container, Progress() as progress_bar:
         out_container.metadata["title"] = "Merged video"
         out_video = out_container.add_stream("libx264", rate=30, options={"crf": "18"})
@@ -460,7 +420,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         out_video.codec_context.time_base = Fraction(1, 30)
         if audio in audioSources and merged_audio is not None:
             audio_arguments = {"codec_name": "aac", "layout": "stereo"}
-            if audio == audioSources.Pupil_Invisible_Mic:
+            if audio == audioSources.Device_Mic:
                 audio_arguments["rate"] = et_audio.streams.audio[0].rate
             elif audio == audioSources.Screen_Audio:
                 audio_arguments["rate"] = sc_audio.streams.audio[0].rate
@@ -469,6 +429,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         idx = 0
         _etlpts = -1
         _sclpts = -1
+        _outts = -1
         merge_videos_task = progress_bar.add_task(
             "🎥 Merging videos", total=merged.shape[0]
         )
@@ -482,6 +443,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             )
 
             if _etframe is None or _scframe is None:
+                _outts = int(row["timestamp [ns]"])
                 break
 
             ref_img_final = prepare_image(
@@ -493,7 +455,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                     ]
                 ],
                 "Reference Image",
-                corners_screen,
+                args.corners_screen,
                 _screen,
                 mheight,
             )
@@ -501,14 +463,14 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 _etframe.to_image().convert("RGB"),
                 row[["gaze x [px]", "gaze y [px]"]],
                 "PI Video",
-                corners_screen,
+                args.corners_screen,
                 _screen,
             )
             _scframe_final = prepare_image(
                 _scframe.to_image().convert("RGB"),
                 row[["gaze position transf x [px]", "gaze position transf y [px]"]],
                 "Screen Video",
-                corners_screen,
+                args.corners_screen,
                 _screen,
             )
 
@@ -528,11 +490,19 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 c_scvid[1] : c_scvid[1] + _scframe_final.shape[1],
                 :,
             ] = _scframe_final
-            if _labels:
+            if args.labels:
                 # Add text to the frames
                 y, w, h = 60, 360, 60
+                label_device = ""
+                with open(os.path.join(args.raw_folder_path, "info.json"), "r") as f:
+                    import json
+
+                    info = json.load(f)
+                    # check if there is a frame_name field in the info.json file
+                    label_device = "Neon" if "frame_name" in info else "Pupil Invisible"
+
                 labels = [
-                    {"text": "PI Video", "margin": 10},
+                    {"text": label_device, "margin": 10},
                     {"text": "Reference Image", "margin": 10 + _etframe.width},
                     {
                         "text": "Screen Video",
@@ -561,9 +531,11 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             # Get the final frame
             out_ = bkg.copy()
             out_ = cv2.normalize(out_, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-            if _visualise:
+            if args.visualise:
                 cv2.imshow("Merged Video", out_)
                 if cv2.waitKey(25) & 0xFF == ord("q"):
+                    cv2.destroyAllWindows()
+                    _outts = int(row["timestamp [ns]"])
                     break
             if _recording:
                 # Convert to av frame
@@ -573,6 +545,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 for packet in out_video.encode(out_frame):
                     out_container.mux(packet)
                 progress_bar.advance(merge_videos_task)
+                progress_bar.refresh()
             idx += 1
         # Flush the encoder
         if _recording:
@@ -587,7 +560,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
             )
             while idx < merged_audio.shape[0]:
                 row = merged_audio.iloc[idx]
-                if audio == audioSources.Pupil_Invisible_Mic:
+                if audio == audioSources.Device_Mic:
                     audio_frame, audio_pts = get_frame(
                         et_audio,
                         int(row["pts_audio"]),
@@ -606,6 +579,8 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 logging.debug(f"Audio frame time: {audio_frame.time}s")
                 if audio_frame is None:
                     break
+                if _outts != -1 and row["timestamp [ns]"] > _outts:
+                    break
                 elif audio_frame.is_corrupt:
                     logging.info(f"Frame {idx} is corrupt")
                 else:
@@ -616,6 +591,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                     out_container.mux(aframes)
 
                 progress_bar.advance(merge_audio_task)
+                progress_bar.refresh()
                 idx += 1
             # After loop finished flush
             for packet in out_audio.encode(None):
@@ -623,7 +599,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
         if _recording:
             out_container.close()
         progress_bar.stop_task(merge_audio_task)
-        logging.info("Video saved to: " + out_vidpath)
+        logging.info("Video saved to: " + args.out_video_path)
 
 
 def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3):
@@ -675,7 +651,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
         cv2.addWeighted(frame[roi], alpha, overlay[roi], 1 - alpha, 0, frame[roi])
         # Gazepoint overlay
         frame = cv2.circle(
-            frame, xy, int(50 * resizefactor), (0, 0, 255), int(10 * resizefactor)
+            frame, xy, int(25 * resizefactor), (0, 0, 255), int(5 * resizefactor)
         )
         # Downsize ref image
         frame = cv2.resize(
@@ -684,12 +660,12 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
     elif str == "PI Video":
         resizefactor = 2 / 3
         frame = cv2.circle(
-            frame, xy, int(50 * resizefactor), (0, 0, 255), int(10 * resizefactor)
+            frame, xy, int(25 * resizefactor), (0, 0, 255), int(5 * resizefactor)
         )
     elif str == "Screen Video":
         resizefactor = 1
         frame = cv2.circle(
-            frame, xy, int(50 * resizefactor), (0, 0, 255), int(10 * resizefactor)
+            frame, xy, int(25 * resizefactor), (0, 0, 255), int(5 * resizefactor)
         )
     return frame
 

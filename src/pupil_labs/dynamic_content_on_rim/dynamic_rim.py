@@ -17,6 +17,7 @@ import pandas as pd
 from rich.logging import RichHandler
 from rich.progress import Progress
 
+from pupil_labs.dynamic_content_on_rim.parser import audioSources, init_parser
 from pupil_labs.dynamic_content_on_rim.uitools.get_corners import pick_point_in_image
 from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     get_file,
@@ -25,7 +26,6 @@ from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     rich_df,
 )
 from pupil_labs.dynamic_content_on_rim.video.read import get_frame, read_video_ts
-from pupil_labs.dynamic_content_on_rim.parser import init_parser, audioSources
 
 # Check if they are using a 64 bit architecture
 verbit = struct.calcsize("P") * 8
@@ -494,7 +494,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 # Add text to the frames
                 y, w, h = 60, 360, 60
                 label_device = ""
-                with open(os.path.join(args.raw_folder_path, "info.json"), "r") as f:
+                with open(os.path.join(args.raw_folder_path, "info.json")) as f:
                     import json
 
                     info = json.load(f)

@@ -17,6 +17,7 @@ import pandas as pd
 from rich.logging import RichHandler
 from rich.progress import Progress
 
+from pupil_labs.dynamic_content_on_rim.parser import audioSources, init_parser
 from pupil_labs.dynamic_content_on_rim.uitools.get_corners import pick_point_in_image
 from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     get_file,
@@ -25,7 +26,6 @@ from pupil_labs.dynamic_content_on_rim.uitools.ui_tools import (
     rich_df,
 )
 from pupil_labs.dynamic_content_on_rim.video.read import get_frame, read_video_ts
-from pupil_labs.dynamic_content_on_rim.parser import init_parser, audioSources
 
 # Check if they are using a 64 bit architecture
 verbit = struct.calcsize("P") * 8
@@ -136,6 +136,10 @@ def main():
 
     # Select corners of the screen
     logging.info("Select corners of the screen...")
+    if args.corners_screen is not None:
+        import ast
+
+        args.corners_screen = ast.literal_eval(args.corners_screen)
     args.corners_screen, ref_img = pick_point_in_image(
         args.rim_folder_path, args.corners_screen, 4
     )
@@ -682,7 +686,7 @@ def check_ids(gaze_df, world_timestamps_df, gaze_rim_df):
     w_ids = world_timestamps_df["recording id"].unique()
     rim_ids = gaze_rim_df["recording id"].unique()
     if g_ids.shape[0] != 1 or w_ids.shape[0] != 1:
-        error_base = f"None or more than one recording ID found "
+        error_base = "None or more than one recording ID found "
         if g_ids.shape[0] != 1:
             error_end = "in gaze data: {g_ids}"
         elif w_ids.shape[0] != 1:

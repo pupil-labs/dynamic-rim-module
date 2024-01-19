@@ -498,7 +498,7 @@ def save_videos(  # noqa: C901 Ignore `Function too complex` flake8 error. TODO:
                 # Add text to the frames
                 y, w, h = 60, 360, 60
                 label_device = ""
-                with open(os.path.join(args.raw_folder_path, "info.json"), "r") as f:
+                with open(os.path.join(args.raw_folder_path, "info.json")) as f:
                     import json
 
                     info = json.load(f)

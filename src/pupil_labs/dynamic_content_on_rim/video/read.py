@@ -20,7 +20,9 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
             stream = video_container.streams.video[0]
         if auto_thread_type:
             stream.thread_type = "AUTO"
-        fps = stream.average_rate  # alt base_rate or guessed_rate
+        fps = (
+            stream.average_rate if not audio else stream.rate
+        )  # alt base_rate or guessed_rate
         nframes = stream.frames
         logging.info("Extracting pts...")
         pts, dts, ts = (list() for i in range(3))

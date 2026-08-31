@@ -3,6 +3,7 @@ Python 3.10 Dynamic RIM Script
 This script is used to plot gaze over a video displayed on RIM
 enrichment eye tracking recording.
 """
+
 import glob
 import logging
 import os
@@ -162,9 +163,9 @@ def main():
     # Applying the perspective transform
     xy_transf = cv2.perspectiveTransform(xy, M)
     # Saving the transformed gaze points
-    gaze_rim_df[
-        ["gaze position transf x [px]", "gaze position transf y [px]"]
-    ] = pd.DataFrame(xy_transf[0]).set_index(gaze_rim_df.index)
+    gaze_rim_df[["gaze position transf x [px]", "gaze position transf y [px]"]] = (
+        pd.DataFrame(xy_transf[0]).set_index(gaze_rim_df.index)
+    )
     # Get the patch of the screen
     mask = np.zeros(np.asarray(ref_img.shape)[0:2], dtype=np.uint8)
     cv2.fillPoly(
@@ -651,7 +652,7 @@ def prepare_image(frame, xy, str, corners_screen, _screen, mheight=0, alpha=0.3)
             ),
         )
         overlay = frame.copy()
-        cv2.fillPoly(frame, [(corners_screen.astype(int))], color)
+        cv2.fillPoly(frame, [corners_screen.astype(int)], color)
         cv2.addWeighted(frame[roi], alpha, overlay[roi], 1 - alpha, 0, frame[roi])
         # Gazepoint overlay
         frame = cv2.circle(

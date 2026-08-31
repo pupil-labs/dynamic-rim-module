@@ -31,8 +31,12 @@ def read_video_ts(video_path, audio=False, auto_thread_type=True):
             for frame in packet.decode():
                 if frame is not None and frame.pts is not None:
                     pts.append(frame.pts)
-                    dts.append(frame.dts) if frame.dts is not None else logging.info(
-                        f"Decoding timestamp is missing at frame {len(pts)}"
+                    (
+                        dts.append(frame.dts)
+                        if frame.dts is not None
+                        else logging.info(
+                            f"Decoding timestamp is missing at frame {len(pts)}"
+                        )
                     )
                     ts.append(
                         (
